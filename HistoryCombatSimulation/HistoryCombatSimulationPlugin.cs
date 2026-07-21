@@ -95,6 +95,7 @@ namespace HistoryCombatSimulation
 				var combat = _game.IsCombatPhase; var enteredCombat = _wasCombat == false && combat;
 				if(enteredCombat) { StopLateSimulationRecovery(); _observedCombatStart = true; }
 				if(combat && _wasCombat != true) ClearUnknownOutcomeRecovery();
+				if(combat && _activeSnapshot != null && CombatTurnBoundary.HasAdvanced(_activeSnapshot.Turn, _game.Turn)) FinalizeInterruptedCombat();
 				if(combat && _activeSnapshot == null) TryBeginCombat(_observedCombatStart && !_damageObservedBeforeSnapshot);
 				if(combat && _activeSnapshot != null && _game.IsReconnect && !_reconnectRecoveryActive) { _reconnectRecoveryActive = true; _missingSimulationPoll.Restart(); InvokeUi(_bobsBuddy.EnableGuardedRecovery); }
 				if(combat && _activeSnapshot != null && _tracker.ActiveRow?.Probabilities == null && _missingSimulationPoll.ElapsedMilliseconds >= (_reconnectRecoveryActive ? 10000 : 2000)) { _missingSimulationPoll.Restart(); InvokeUi(_bobsBuddy.PollRecovery); }
@@ -118,6 +119,15 @@ namespace HistoryCombatSimulation
 			_activeSnapshot = row.Snapshot; _activeSnapshotHasReliableStart = reliableStart; _friendlyDamageAmount = 0; _opponentDamageAmount = 0; ClearAwaitingDefinitiveResult();
 			_reconnectRecoveryActive = _game.IsReconnect; _missingSimulationPoll.Restart();
 			_bobsBuddy.BeginCombat(row.Snapshot.Turn, guardedRecovery: true);
+		}
+
+		private void FinalizeInterruptedCombat()
+		{
+			var snapshot = _activeSnapshot; if(snapshot == null) return;
+			_bobsBuddy.EndCombat(); _tracker.FinalizeCombat(snapshot.Turn, CombatOutcome.Unknown);
+			ClearAwaitingDefinitiveResult(); ClearUnknownOutcomeRecovery();
+			_activeSnapshot = null; _activeSnapshotHasReliableStart = false; _observedCombatStart = false; _damageObservedBeforeSnapshot = false;
+			_friendlyDamageAmount = 0; _opponentDamageAmount = 0; _missingSimulationPoll.Reset(); _reconnectRecoveryActive = false;
 		}
 
 		private void FinalizeActiveCombat(CombatOutcome? definitiveMatchResult = null)
@@ -153,7 +163,7 @@ namespace HistoryCombatSimulation
 
 		private void StartLateSimulationRecovery(int turn)
 		{
-			_lateSimulationTurn = turn; _lateSimulationWindow.Restart(); _lateSimulationPoll.Restart();
+			_lateSimulationTurn = turn; _lateSimulationWindow.Restart(); _lateSimulationPoll.Restart(); _bobsBuddy.BeginPostCombatRecovery();
 		}
 
 		private void PollLateSimulationRecovery()

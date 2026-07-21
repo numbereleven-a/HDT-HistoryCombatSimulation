@@ -18,8 +18,9 @@ namespace HistoryCombatSimulation
 		public bool TryCapture(string state, string errorState, bool percentagesVisible, string? win, string? tie, string? loss, CultureInfo culture, out SimulationProbabilities? result, bool guardedCheck = false, bool allowPostCombatState = false)
 		{
 			result = null;
-			var validState = string.Equals(state, "Combat", StringComparison.Ordinal)
-				|| allowPostCombatState && (string.Equals(state, "Shopping", StringComparison.Ordinal) || string.Equals(state, "GameOver", StringComparison.Ordinal));
+			var combatState = string.Equals(state, "Combat", StringComparison.Ordinal);
+			var postCombatState = string.Equals(state, "Shopping", StringComparison.Ordinal) || string.Equals(state, "GameOver", StringComparison.Ordinal);
+			var validState = allowPostCombatState ? combatState || postCombatState : combatState;
 			if(!validState || !string.Equals(errorState, "None", StringComparison.Ordinal))
 				return false;
 			if(IsPlaceholder(win) || IsPlaceholder(tie) || IsPlaceholder(loss))
@@ -30,9 +31,9 @@ namespace HistoryCombatSimulation
 			{
 				result = null; return false;
 			}
-			if(!_resetObserved)
+			if(allowPostCombatState || !_resetObserved)
 			{
-				if(!_guardedRecovery) { result = null; return false; }
+				if(!allowPostCombatState && !_guardedRecovery) { result = null; return false; }
 				if(_recoveryCandidate == null || !result.Equals(_recoveryCandidate)) { _recoveryCandidate = result; _stableRecoveryChecks = 1; result = null; return false; }
 				if(!guardedCheck) { result = null; return false; }
 				_stableRecoveryChecks++;

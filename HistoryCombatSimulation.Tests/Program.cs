@@ -15,6 +15,7 @@ internal static class Program
 		StaleDataDoesNotLeak();
 		ParserAcceptsCulturesAndRejectsIncompleteValues();
 		CaptureGateRejectsStalePartialAndErrorStates();
+		PostCombatRecoveryAcceptsStableCombatOrShoppingData();
 		OutcomeResolutionIsConservative();
 		OutcomeRecoveryRequiresStableEvidence();
 		GhostIdentityIsKeptWithoutGuessing();
@@ -22,8 +23,10 @@ internal static class Program
 		PostMatchRetentionAndNewMatchReset();
 		PostMatchStaleSoloStateDoesNotStartANewMatch();
 		ReconnectGameStartDoesNotClearTheExistingMatch();
+		ReconnectTurnAdvanceIsDetectedWithoutAPhaseEdge();
 		FormattingSupportsBothLayouts();
 		LongHistoryIsRetainedForViewporting();
+		ViewportChangesKeepTheNewestRowsVisible();
 		AnomaliesAndSummaryAreSymmetric();
 		VersionAndMovementDefaultsAreStable();
 		Console.WriteLine("All HistoryCombatSimulation tests passed.");
@@ -138,6 +141,19 @@ internal static class Program
 		var partialLate = new BobsBuddyCaptureGate(); partialLate.BeginCombat(true); False(partialLate.TryCapture("ShoppingAfterPartial", "None", true, "100%", "0%", "0%", CultureInfo.InvariantCulture, out _, guardedCheck: true, allowPostCombatState: true), "partial Duo shopping results remain rejected");
 	}
 
+	private static void PostCombatRecoveryAcceptsStableCombatOrShoppingData()
+	{
+		var gate = new BobsBuddyCaptureGate(); gate.BeginCombat(true);
+		False(gate.TryCapture("Combat", "None", true, "-", "-", "-", CultureInfo.InvariantCulture, out _), "combat placeholder arms the current turn");
+		False(gate.TryCapture("Shopping", "None", true, "100%", "0%", "0%", CultureInfo.InvariantCulture, out _, guardedCheck: true, allowPostCombatState: true), "first post-combat value is only a candidate even after a reset");
+		True(gate.TryCapture("Shopping", "None", true, "100%", "0%", "0%", CultureInfo.InvariantCulture, out _, guardedCheck: true, allowPostCombatState: true), "stable post-combat value is accepted");
+		var oldTurn = new BobsBuddyCaptureGate(); oldTurn.BeginCombat(true);
+		False(oldTurn.TryCapture("Combat", "None", true, "-", "-", "-", CultureInfo.InvariantCulture, out _), "old turn reset observed");
+		False(oldTurn.TryCapture("Combat", "None", true, "70%", "10%", "20%", CultureInfo.InvariantCulture, out _, guardedCheck: true, allowPostCombatState: true), "first late Combat-state value is only a candidate");
+		True(oldTurn.TryCapture("Combat", "None", true, "70%", "10%", "20%", CultureInfo.InvariantCulture, out var lateCombatResult, guardedCheck: true, allowPostCombatState: true), "stable late Combat-state value is accepted after the game combat phase ended");
+		Near(.70, lateCombatResult!.Win, "late Combat-state win chance");
+	}
+
 	private static void GhostIdentityIsKeptWithoutGuessing()
 	{
 		var tracker = new CombatHistoryTracker(); tracker.BeginCombat(Snapshot(4, 9, true));
@@ -181,6 +197,19 @@ internal static class Program
 		Equal(GameStartDecision.StartNewMatch, gate.Resolve(true, false, 60000), "a confirmed non-reconnect starts a new match");
 	}
 
+	private static void ReconnectTurnAdvanceIsDetectedWithoutAPhaseEdge()
+	{
+		True(CombatTurnBoundary.HasAdvanced(2, 7), "a reconnect into a later combat detects the skipped phase edge");
+		False(CombatTurnBoundary.HasAdvanced(7, 7), "the same combat is not treated as a new turn");
+		False(CombatTurnBoundary.HasAdvanced(7, 0), "temporarily missing turn metadata does not discard the active combat");
+		var tracker = new CombatHistoryTracker(); tracker.BeginCombat(Snapshot(2, 3));
+		if(CombatTurnBoundary.HasAdvanced(tracker.ActiveRow!.Snapshot.Turn, 7)) tracker.FinalizeCombat(2, CombatOutcome.Unknown);
+		tracker.BeginCombat(Snapshot(7, 8));
+		Equal(2, tracker.Rows.Count, "the interrupted row is retained and the current reconnect combat gets its own row");
+		True(tracker.Rows[0].IsFinalized, "the interrupted combat is finalized conservatively"); Equal(CombatOutcome.Unknown, tracker.Rows[0].Outcome, "the interrupted combat does not fabricate an outcome");
+		Equal(7, tracker.ActiveRow!.Snapshot.Turn, "the later combat becomes the active row");
+	}
+
 	private static void FormattingSupportsBothLayouts()
 	{
 		var p = new SimulationProbabilities(.642, .031, .327);
@@ -197,6 +226,13 @@ internal static class Program
 		for(var turn = 1; turn <= 21; turn++) { tracker.BeginCombat(Snapshot(turn, turn + 1)); tracker.FinalizeCombat(turn, CombatOutcome.Tie); }
 		Equal(21, tracker.Rows.Count, "history does not discard older rows");
 		Equal(7, Math.Max(0, tracker.Rows.Count - 14), "default hidden-row count");
+	}
+
+	private static void ViewportChangesKeepTheNewestRowsVisible()
+	{
+		True(HistoryViewportPolicy.ShouldScrollToNewest(20, 20, 14, 6, true), "reducing visible rows while at the end keeps the newest combat visible");
+		False(HistoryViewportPolicy.ShouldScrollToNewest(20, 20, 14, 6, false), "changing the viewport does not discard an intentional older scroll position");
+		True(HistoryViewportPolicy.ShouldScrollToNewest(20, 21, 6, 6, false), "a newly added combat remains automatically visible");
 	}
 
 	private static void AnomaliesAndSummaryAreSymmetric()
@@ -224,8 +260,8 @@ internal static class Program
 
 	private static void VersionAndMovementDefaultsAreStable()
 	{
-		Equal("1.0", PluginVersion.Display, "short displayed version"); Equal("1.0", PluginVersion.LocalRelease, "stable release label"); Equal("1.0", PluginVersion.Hdt.ToString(), "HDT version has no trailing zeroes");
-		Equal("1.0", typeof(PluginVersion).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion, "assembly informational version has no source revision suffix");
+		Equal("1.1", PluginVersion.Display, "short displayed version"); Equal("1.1", PluginVersion.LocalRelease, "stable release label"); Equal("1.1", PluginVersion.Hdt.ToString(), "HDT version has no trailing zeroes");
+		Equal("1.1", typeof(PluginVersion).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion, "assembly informational version has no source revision suffix");
 		var settings = new PluginSettings(); True(settings.LockOverlayPosition, "overlay movement is locked by default"); True(settings.ShowAnomalyStatus, "anomaly status is shown by default");
 		False(settings.ShowDamageColumn, "combat damage column is hidden by default"); True(settings.ShowHeroColumn, "hero column is shown by default");
 		True(settings.StrictAnomalies, "strict anomaly mode is enabled by default");

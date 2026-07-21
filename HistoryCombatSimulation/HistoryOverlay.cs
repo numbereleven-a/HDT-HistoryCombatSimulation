@@ -36,6 +36,7 @@ namespace HistoryCombatSimulation
 		private bool _attached;
 		private bool _changingScroll;
 		private int _lastRowCount;
+		private int? _visibleRows;
 		private readonly IReadOnlyList<CombatRow> _previewRows = CreatePreviewRows();
 		private bool _dragging;
 		private Point _dragStart;
@@ -71,7 +72,7 @@ namespace HistoryCombatSimulation
 		{
 			if(!_attached || !settings.Enabled || !shouldShow) { Hide(); return; }
 			var preview = rows.Count == 0 && !settings.LockOverlayPosition;
-			if(rows.Count == 0 && !preview) { _lastRowCount = 0; _scroll.Value = 0; _rows.Children.Clear(); _rowVisuals.Clear(); Hide(); return; }
+			if(rows.Count == 0 && !preview) { _lastRowCount = 0; _visibleRows = null; _scroll.Value = 0; _rows.Children.Clear(); _rowVisuals.Clear(); Hide(); return; }
 			var displayRows = preview ? _previewRows : rows;
 			settings.Normalize(); _lastRows = displayRows; _lastSettings = settings;
 			_title.ToolTip = settings.StrictAnomalies ? "Strict anomalies: one unique most likely result did not happen. ! for any miss, !! from 80%, !!! from 95%. Equal highest chances are not marked." : "Anomaly markers appear when the most likely result did not happen: ! above the configured light threshold, !! above the strong threshold, !!! above the extreme threshold.";
@@ -97,10 +98,11 @@ namespace HistoryCombatSimulation
 				var s = AnomalyClassifier.Summarize(displayRows);
 				_summary.Text = string.Format(CultureInfo.CurrentUICulture, "N {0}   ACTUAL / EXPECTED   W {1}/{2:0.0}   T {3}/{4:0.0}   L {5}/{6:0.0}", s.SampleSize, s.ActualWins, s.ExpectedWins, s.ActualTies, s.ExpectedTies, s.ActualLosses, s.ExpectedLosses);
 			}
+			var wasAtNewest = Math.Abs(_scroll.Value - _scroll.Maximum) < .5;
 			_changingScroll = true; _scroll.Maximum = Math.Max(0, displayRows.Count - settings.VisibleRows); _scroll.ViewportSize = settings.VisibleRows;
-			if(displayRows.Count > _lastRowCount) _scroll.Value = _scroll.Maximum;
+			if(HistoryViewportPolicy.ShouldScrollToNewest(_lastRowCount, displayRows.Count, _visibleRows, settings.VisibleRows, wasAtNewest)) _scroll.Value = _scroll.Maximum;
 			_scroll.Visibility = displayRows.Count > settings.VisibleRows ? Visibility.Visible : Visibility.Collapsed; _changingScroll = false;
-			_lastRowCount = displayRows.Count; RenderViewport(displayRows, settings); Position(settings); ApplyInteraction(settings); _background.Color = Color.FromArgb((byte)Math.Round(settings.BackgroundOpacity * 255), 18, 20, 23); _layer.Opacity = settings.Opacity; _layer.RenderTransform = new ScaleTransform(settings.Scale, settings.Scale); _layer.Visibility = Visibility.Visible;
+			_lastRowCount = displayRows.Count; _visibleRows = settings.VisibleRows; RenderViewport(displayRows, settings); Position(settings); ApplyInteraction(settings); _background.Color = Color.FromArgb((byte)Math.Round(settings.BackgroundOpacity * 255), 18, 20, 23); _layer.Opacity = settings.Opacity; _layer.RenderTransform = new ScaleTransform(settings.Scale, settings.Scale); _layer.Visibility = Visibility.Visible;
 		}
 
 		private void RenderViewport(IReadOnlyList<CombatRow> rows, PluginSettings settings)

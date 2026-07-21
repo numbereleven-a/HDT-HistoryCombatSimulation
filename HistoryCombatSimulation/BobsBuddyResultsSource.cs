@@ -12,6 +12,7 @@ namespace HistoryCombatSimulation
 	{
 		private BobsBuddyPanel? _panel;
 		private int? _activeTurn;
+		private bool _postCombatRecovery;
 		private readonly BobsBuddyCaptureGate _gate = new BobsBuddyCaptureGate();
 		public event EventHandler<SimulationResultEventArgs>? ResultAvailable;
 
@@ -29,18 +30,19 @@ namespace HistoryCombatSimulation
 
 		public void BeginCombat(int turn, bool guardedRecovery = false)
 		{
-			_activeTurn = turn; _gate.BeginCombat(guardedRecovery);
+			_activeTurn = turn; _postCombatRecovery = false; _gate.BeginCombat(guardedRecovery);
 		}
 
 		public void PollRecovery() => TryPublishSafely(true);
-		public void PollLateRecovery() => TryPublishSafely(true, allowPostCombatState: true);
+		public void BeginPostCombatRecovery() { if(_activeTurn.HasValue) _postCombatRecovery = true; }
+		public void PollLateRecovery() { if(_postCombatRecovery) TryPublishSafely(true, allowPostCombatState: true); }
 		public void EnableGuardedRecovery() => _gate.EnableGuardedRecovery();
 
-		public void EndCombat() { _activeTurn = null; _gate.EndCombat(); }
+		public void EndCombat() { _activeTurn = null; _postCombatRecovery = false; _gate.EndCombat(); }
 		private void OnPropertyChanged(object? sender, PropertyChangedEventArgs e)
 		{
 			if(_panel == null || !_activeTurn.HasValue) return;
-			TryPublishSafely(false);
+			TryPublishSafely(false, _postCombatRecovery);
 		}
 
 		private void TryPublishSafely(bool guardedCheck, bool allowPostCombatState = false)
@@ -54,7 +56,10 @@ namespace HistoryCombatSimulation
 			var panel = _panel;
 			if(panel == null || !_activeTurn.HasValue)
 				return;
-			if(!_gate.TryCapture(panel.State.ToString(), panel.ErrorState.ToString(), panel.PercentagesVisibility == Visibility.Visible, panel.WinRateDisplay, panel.TieRateDisplay, panel.LossRateDisplay, CultureInfo.CurrentCulture, out var probabilities, guardedCheck, allowPostCombatState) || probabilities == null)
+			var state = panel.State.ToString();
+			var game = Core.Game;
+			if(_postCombatRecovery && game?.IsBattlegroundsCombatPhase == true && CombatTurnBoundary.HasAdvanced(_activeTurn.Value, game.GetTurnNumber())) { EndCombat(); return; }
+			if(!_gate.TryCapture(state, panel.ErrorState.ToString(), panel.PercentagesVisibility == Visibility.Visible, panel.WinRateDisplay, panel.TieRateDisplay, panel.LossRateDisplay, CultureInfo.CurrentCulture, out var probabilities, guardedCheck, allowPostCombatState) || probabilities == null)
 				return;
 			ResultAvailable?.Invoke(this, new SimulationResultEventArgs(_activeTurn.Value, probabilities!));
 		}
