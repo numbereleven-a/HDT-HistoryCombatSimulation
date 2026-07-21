@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>HistoryCombatSimulation</AssemblyName>
+    <RootNamespace>HistoryCombatSimulation</RootNamespace>
+    <Version>1.0.0</Version>
+    <InformationalVersion>1.0</InformationalVersion>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <PlatformTarget>x64</PlatformTarget>
+    <Platforms>x64</Platforms>
+    <LangVersion>10</LangVersion>
+    <Nullable>enable</Nullable>
+    <Deterministic>true</Deterministic>
+    <DebugType>portable</DebugType>
+    <PathMap>$(MSBuildProjectDirectory)=/_/HistoryCombatSimulation</PathMap>
+    <HdtDir Condition="'$(HdtDir)' == ''">$(HDT_DIR)</HdtDir>
+    <HdtExe Condition="'$(HdtExe)' == ''">$(HdtDir)\Hearthstone Deck Tracker\bin\x64\Release\HearthstoneDeckTracker.exe</HdtExe>
+    <HearthDbPath Condition="'$(HearthDbPath)' == ''">$(HdtDir)\lib\HearthDb.dll</HearthDbPath>
+    <HearthMirrorPath Condition="'$(HearthMirrorPath)' == ''">$(HdtDir)\lib\HearthMirror.dll</HearthMirrorPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="HearthstoneDeckTracker">
+      <HintPath>$(HdtExe)</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="HearthDb">
+      <HintPath>$(HearthDbPath)</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="HearthMirror">
+      <HintPath>$(HearthMirrorPath)</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

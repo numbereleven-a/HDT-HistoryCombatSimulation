@@ -1,0 +1,25 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HistoryCombatSimulation", "HistoryCombatSimulation\HistoryCombatSimulation.csproj", "{A23186F0-293D-4A5C-9864-46A89B8228C8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HistoryCombatSimulation.Tests", "HistoryCombatSimulation.Tests\HistoryCombatSimulation.Tests.csproj", "{E14DA203-99F0-4D6A-8514-BCE39E622726}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A23186F0-293D-4A5C-9864-46A89B8228C8}.Debug|x64.ActiveCfg = Debug|x64
+		{A23186F0-293D-4A5C-9864-46A89B8228C8}.Debug|x64.Build.0 = Debug|x64
+		{A23186F0-293D-4A5C-9864-46A89B8228C8}.Release|x64.ActiveCfg = Release|x64
+		{A23186F0-293D-4A5C-9864-46A89B8228C8}.Release|x64.Build.0 = Release|x64
+		{E14DA203-99F0-4D6A-8514-BCE39E622726}.Debug|x64.ActiveCfg = Debug|x64
+		{E14DA203-99F0-4D6A-8514-BCE39E622726}.Debug|x64.Build.0 = Debug|x64
+		{E14DA203-99F0-4D6A-8514-BCE39E622726}.Release|x64.ActiveCfg = Release|x64
+		{E14DA203-99F0-4D6A-8514-BCE39E622726}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+EndGlobal
+
