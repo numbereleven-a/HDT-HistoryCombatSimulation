@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Xml.Serialization;
 using HistoryCombatSimulation;
 
@@ -224,6 +225,7 @@ internal static class Program
 	private static void VersionAndMovementDefaultsAreStable()
 	{
 		Equal("1.0", PluginVersion.Display, "short displayed version"); Equal("1.0", PluginVersion.LocalRelease, "stable release label"); Equal("1.0", PluginVersion.Hdt.ToString(), "HDT version has no trailing zeroes");
+		Equal("1.0", typeof(PluginVersion).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion, "assembly informational version has no source revision suffix");
 		var settings = new PluginSettings(); True(settings.LockOverlayPosition, "overlay movement is locked by default"); True(settings.ShowAnomalyStatus, "anomaly status is shown by default");
 		False(settings.ShowDamageColumn, "combat damage column is hidden by default"); True(settings.ShowHeroColumn, "hero column is shown by default");
 		True(settings.StrictAnomalies, "strict anomaly mode is enabled by default");

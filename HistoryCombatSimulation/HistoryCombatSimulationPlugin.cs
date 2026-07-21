@@ -55,7 +55,7 @@ namespace HistoryCombatSimulation
 		internal bool IsLoaded => _loaded;
 
 		public string Name => "History Combat Simulation";
-		public string Description => "Shows an in-memory Battlegrounds combat history using Bob's Buddy results.";
+		public string Description => "Shows an in-memory Battlegrounds combat history using Bob's Buddy results.\n\nGitHub: https://github.com/numbereleven-a/HDT-HistoryCombatSimulation";
 		public string ButtonText => "Settings";
 		public string Author => "numbereleven-a";
 		public Version Version => PluginVersion.Hdt;
