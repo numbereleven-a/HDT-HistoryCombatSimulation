@@ -23,7 +23,8 @@ internal static class Program
 		PostMatchRetentionAndNewMatchReset();
 		PostMatchStaleSoloStateDoesNotStartANewMatch();
 		ReconnectGameStartDoesNotClearTheExistingMatch();
-		ReconnectTurnAdvanceIsDetectedWithoutAPhaseEdge();
+		TransientTurnAdvanceDoesNotCreateAPhantomCombat();
+		StableTurnAdvanceRecoversASkippedPhaseEdge();
 		FormattingSupportsBothLayouts();
 		LongHistoryIsRetainedForViewporting();
 		ViewportChangesKeepTheNewestRowsVisible();
@@ -197,17 +198,27 @@ internal static class Program
 		Equal(GameStartDecision.StartNewMatch, gate.Resolve(true, false, 60000), "a confirmed non-reconnect starts a new match");
 	}
 
-	private static void ReconnectTurnAdvanceIsDetectedWithoutAPhaseEdge()
+	private static void TransientTurnAdvanceDoesNotCreateAPhantomCombat()
 	{
-		True(CombatTurnBoundary.HasAdvanced(2, 7), "a reconnect into a later combat detects the skipped phase edge");
-		False(CombatTurnBoundary.HasAdvanced(7, 7), "the same combat is not treated as a new turn");
-		False(CombatTurnBoundary.HasAdvanced(7, 0), "temporarily missing turn metadata does not discard the active combat");
-		var tracker = new CombatHistoryTracker(); tracker.BeginCombat(Snapshot(2, 3));
-		if(CombatTurnBoundary.HasAdvanced(tracker.ActiveRow!.Snapshot.Turn, 7)) tracker.FinalizeCombat(2, CombatOutcome.Unknown);
-		tracker.BeginCombat(Snapshot(7, 8));
-		Equal(2, tracker.Rows.Count, "the interrupted row is retained and the current reconnect combat gets its own row");
-		True(tracker.Rows[0].IsFinalized, "the interrupted combat is finalized conservatively"); Equal(CombatOutcome.Unknown, tracker.Rows[0].Outcome, "the interrupted combat does not fabricate an outcome");
-		Equal(7, tracker.ActiveRow!.Snapshot.Turn, "the later combat becomes the active row");
+		var gate = new CombatTurnAdvanceGate();
+		var tracker = new CombatHistoryTracker(); tracker.BeginCombat(Snapshot(8, 3)); tracker.UpdateSimulation(8, new SimulationProbabilities(1, 0, 0));
+		False(gate.ShouldRollOver(8, 9, true, 1000), "a changed turn while the old combat flag is still set starts confirmation");
+		False(gate.ShouldRollOver(8, 9, false, 1050), "entering shopping cancels the apparent skipped combat transition");
+		var evidence = new OutcomeEvidence(null, null, null, null, opponentDamageObserved: true, opponentDamageAmount: 15);
+		var outcome = CombatOutcomeResolver.Resolve(evidence); tracker.FinalizeCombat(8, outcome, CombatOutcomeResolver.ResolveDamage(outcome, evidence));
+		Equal(1, tracker.Rows.Count, "the shopping transition does not create a phantom ninth row");
+		Equal(CombatOutcome.Win, tracker.Rows[0].Outcome, "the eighth combat keeps its observed win"); Equal<int?>(15, tracker.Rows[0].CombatDamage, "the eighth combat keeps its observed damage");
+		tracker.BeginCombat(Snapshot(9, 4)); Equal(2, tracker.Rows.Count, "the ninth row starts only on the real next combat"); True(tracker.Rows[1].Probabilities == null, "the ninth row does not inherit the eighth simulation");
+	}
+
+	private static void StableTurnAdvanceRecoversASkippedPhaseEdge()
+	{
+		var gate = new CombatTurnAdvanceGate();
+		False(gate.ShouldRollOver(2, 7, true, 1000), "a reconnect into a later combat first becomes a candidate");
+		False(gate.ShouldRollOver(2, 7, true, 2999), "the later combat must remain stable for the full confirmation interval");
+		True(gate.ShouldRollOver(2, 7, true, 3000), "a stable later combat recovers the skipped phase edge");
+		False(gate.ShouldRollOver(7, 7, true, 4000), "the same combat is not treated as a new turn");
+		False(gate.ShouldRollOver(7, 0, true, 5000), "temporarily missing turn metadata does not discard the active combat");
 	}
 
 	private static void FormattingSupportsBothLayouts()

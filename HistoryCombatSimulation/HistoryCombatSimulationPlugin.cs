@@ -22,6 +22,7 @@ namespace HistoryCombatSimulation
 		private readonly Stopwatch _lateSimulationWindow = new Stopwatch();
 		private readonly Stopwatch _lateSimulationPoll = new Stopwatch();
 		private readonly OutcomeRecoveryGate _outcomeRecoveryGate = new OutcomeRecoveryGate();
+		private readonly CombatTurnAdvanceGate _combatTurnAdvanceGate = new CombatTurnAdvanceGate();
 		private readonly SoloMatchReentryGate _soloMatchReentryGate = new SoloMatchReentryGate();
 		private readonly ReconnectGameStartGate _gameStartGate = new ReconnectGameStartGate();
 		private PluginSettings _settings = new PluginSettings();
@@ -95,7 +96,7 @@ namespace HistoryCombatSimulation
 				var combat = _game.IsCombatPhase; var enteredCombat = _wasCombat == false && combat;
 				if(enteredCombat) { StopLateSimulationRecovery(); _observedCombatStart = true; }
 				if(combat && _wasCombat != true) ClearUnknownOutcomeRecovery();
-				if(combat && _activeSnapshot != null && CombatTurnBoundary.HasAdvanced(_activeSnapshot.Turn, _game.Turn)) FinalizeInterruptedCombat();
+				if(_activeSnapshot != null && _combatTurnAdvanceGate.ShouldRollOver(_activeSnapshot.Turn, _game.Turn, combat, _uptime.ElapsedMilliseconds)) FinalizeInterruptedCombat();
 				if(combat && _activeSnapshot == null) TryBeginCombat(_observedCombatStart && !_damageObservedBeforeSnapshot);
 				if(combat && _activeSnapshot != null && _game.IsReconnect && !_reconnectRecoveryActive) { _reconnectRecoveryActive = true; _missingSimulationPoll.Restart(); InvokeUi(_bobsBuddy.EnableGuardedRecovery); }
 				if(combat && _activeSnapshot != null && _tracker.ActiveRow?.Probabilities == null && _missingSimulationPoll.ElapsedMilliseconds >= (_reconnectRecoveryActive ? 10000 : 2000)) { _missingSimulationPoll.Restart(); InvokeUi(_bobsBuddy.PollRecovery); }
@@ -108,7 +109,7 @@ namespace HistoryCombatSimulation
 
 		private void StartSoloMatch()
 		{
-			_matchEpoch++; _insideSoloMatch = true; _wasCombat = null; _activeSnapshot = null; _activeSnapshotHasReliableStart = false; _observedCombatStart = false; _damageObservedBeforeSnapshot = false; _reconnectRecoveryActive = false; StopLateSimulationRecovery(); ClearAwaitingDefinitiveResult(); ClearUnknownOutcomeRecovery(); _tracker.StartNewMatch();
+			_matchEpoch++; _insideSoloMatch = true; _wasCombat = null; _activeSnapshot = null; _activeSnapshotHasReliableStart = false; _observedCombatStart = false; _damageObservedBeforeSnapshot = false; _reconnectRecoveryActive = false; _combatTurnAdvanceGate.Reset(); StopLateSimulationRecovery(); ClearAwaitingDefinitiveResult(); ClearUnknownOutcomeRecovery(); _tracker.StartNewMatch();
 		}
 
 		private void TryBeginCombat(bool reliableStart)
@@ -193,7 +194,7 @@ namespace HistoryCombatSimulation
 		private void ExitSoloMatch()
 		{
 			if(_activeSnapshot != null) FinalizeActiveCombat();
-			_insideSoloMatch = false; _wasCombat = null; _observedCombatStart = false; _damageObservedBeforeSnapshot = false; _reconnectRecoveryActive = false; _missingSimulationPoll.Reset();
+			_insideSoloMatch = false; _wasCombat = null; _observedCombatStart = false; _damageObservedBeforeSnapshot = false; _reconnectRecoveryActive = false; _combatTurnAdvanceGate.Reset(); _missingSimulationPoll.Reset();
 			if(!_tracker.EndMatch() && _tracker.SnapshotRows().Count == 0) RefreshOverlay();
 		}
 
