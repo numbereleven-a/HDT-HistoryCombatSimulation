@@ -1,4 +1,4 @@
-# HistoryCombatSimulation
+# History Combat Simulation
 
 HistoryCombatSimulation lets you compare each Solo Battlegrounds combat result with Bob's Buddy's predicted win, tie, and loss chances.
 
