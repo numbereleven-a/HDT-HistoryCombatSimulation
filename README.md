@@ -6,9 +6,7 @@ It is a plugin for [Hearthstone Deck Tracker](https://github.com/HearthSim/Heart
 
 The plugin supports the Windows version of HDT.
 
-![HistoryCombatSimulation overlay](images/overlay.jpg)
-
-![HistoryCombatSimulation options](images/options.jpg)
+![HistoryCombatSimulation](images/image.jpg)
 
 ## Features
 
