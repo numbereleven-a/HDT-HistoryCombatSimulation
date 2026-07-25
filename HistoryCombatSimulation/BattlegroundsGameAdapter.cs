@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using HearthDb.Enums;
 using Hearthstone_Deck_Tracker;
@@ -15,19 +16,26 @@ namespace HistoryCombatSimulation
 
 		public CombatSnapshot? SnapshotCombat()
 		{
-			var game = Core.Game; if(game == null) return null;
+			var game = Core.Game;
+			if(game == null || !TryScanHeroes(game.Entities.Values, out var heroes))
+				return null;
 			var opponentId = game.PlayerEntity?.GetTag(GameTag.NEXT_OPPONENT_PLAYER_ID) ?? 0;
 			if(opponentId <= 0)
 				opponentId = game.OpponentEntity?.GetTag(GameTag.PLAYER_ID) ?? 0;
-			var opponent = FindHero(opponentId); var friendlyId = GetLocalPlayerId(); var friendly = FindHero(friendlyId);
-			if(opponent == null || opponentId <= 0) return null;
+			var opponent = FindHero(heroes, opponentId);
+			var friendly = FindHero(heroes, GetLocalPlayerId());
+			if(opponent == null || opponentId <= 0)
+				return null;
 			return new CombatSnapshot(Turn, opponentId, opponent.Id, opponent.CardId ?? string.Empty, opponent.Health <= 0,
 				Durability(friendly), Durability(opponent));
 		}
 
 		public OutcomeEvidence GetOutcomeEvidence(CombatSnapshot before, int friendlyDamageAmount, int opponentDamageAmount, bool forceUncertain = false, bool allowReconnectRecovery = false)
 		{
-			var friendly = FindHero(GetLocalPlayerId()); var opponent = FindHero(before.OpponentPlayerId);
+			var game = Core.Game;
+			TryScanHeroes(game?.Entities.Values, out var heroes);
+			var friendly = FindHero(heroes, GetLocalPlayerId());
+			var opponent = FindHero(heroes, before.OpponentPlayerId);
 			var friendlyAfter = Durability(friendly); var opponentAfter = Durability(opponent);
 			var uncertain = forceUncertain || IsReconnect && !allowReconnectRecovery || !before.FriendlyDurability.HasValue || !before.OpponentDurability.HasValue || !friendlyAfter.HasValue || !opponentAfter.HasValue;
 			return new OutcomeEvidence(before.FriendlyDurability, friendlyAfter, before.OpponentDurability, opponentAfter, friendlyDamageAmount > 0, opponentDamageAmount > 0, uncertain, friendlyDamageAmount, opponentDamageAmount);
@@ -49,13 +57,28 @@ namespace HistoryCombatSimulation
 		}
 
 		private static int? Durability(Entity? hero) => hero == null ? (int?)null : hero.Health + hero.GetTag(GameTag.ARMOR);
-		private static Entity? FindHero(int playerId)
+		private static bool TryScanHeroes(IEnumerable<Entity>? entities, out Entity[] heroes)
 		{
-			if(playerId <= 0) return null;
-			var heroes = Core.Game?.Entities.Values.Where(x => x.IsHero && x.GetTag(GameTag.PLAYER_ID) == playerId).ToArray();
-			if(heroes == null) return null;
-			return heroes.FirstOrDefault(x => x.GetTag(GameTag.PLAYER_LEADERBOARD_PLACE) is > 0 and <= 8) ?? heroes.FirstOrDefault();
+			heroes = Array.Empty<Entity>();
+			if(entities == null)
+				return false;
+			try
+			{
+				heroes = entities.Where(entity => entity.IsHero).ToArray();
+				return true;
+			}
+			catch(InvalidOperationException)
+			{
+				return false;
+			}
 		}
+
+		private static Entity? FindHero(IEnumerable<Entity> heroes, int playerId) =>
+			playerId <= 0
+				? null
+				: heroes.Where(hero => hero.GetTag(GameTag.PLAYER_ID) == playerId)
+					.OrderByDescending(hero => hero.GetTag(GameTag.PLAYER_LEADERBOARD_PLACE) is > 0 and <= 8)
+					.FirstOrDefault();
 	}
 
 	public enum DamageTarget { None, Friendly, Opponent }

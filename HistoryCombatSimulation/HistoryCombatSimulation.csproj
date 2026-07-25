@@ -4,11 +4,11 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>HistoryCombatSimulation</AssemblyName>
     <RootNamespace>HistoryCombatSimulation</RootNamespace>
-    <Version>1.1</Version>
-    <InformationalVersion>1.1</InformationalVersion>
+    <Version>1.2</Version>
+    <InformationalVersion>1.2</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
-    <AssemblyVersion>1.1.0.0</AssemblyVersion>
-    <FileVersion>1.1.0.0</FileVersion>
+    <AssemblyVersion>1.2.0.0</AssemblyVersion>
+    <FileVersion>1.2.0.0</FileVersion>
     <PlatformTarget>x64</PlatformTarget>
     <Platforms>x64</Platforms>
     <LangVersion>10</LangVersion>
@@ -22,6 +22,7 @@
     <HearthMirrorPath Condition="'$(HearthMirrorPath)' == ''">$(HdtDir)\lib\HearthMirror.dll</HearthMirrorPath>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="System.Net.Http" />
     <Reference Include="HearthstoneDeckTracker">
       <HintPath>$(HdtExe)</HintPath>
       <Private>false</Private>

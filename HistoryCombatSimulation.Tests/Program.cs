@@ -2,7 +2,11 @@ using System;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
 using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Xml.Serialization;
 using HistoryCombatSimulation;
 
@@ -28,7 +32,9 @@ internal static class Program
 		FormattingSupportsBothLayouts();
 		LongHistoryIsRetainedForViewporting();
 		ViewportChangesKeepTheNewestRowsVisible();
+		OverlayPositionRemainsStableWhenWidthChanges();
 		AnomaliesAndSummaryAreSymmetric();
+		VersionParsingAndManualUpdateCheck();
 		VersionAndMovementDefaultsAreStable();
 		Console.WriteLine("All HistoryCombatSimulation tests passed.");
 		return 0;
@@ -116,42 +122,42 @@ internal static class Program
 	private static void CaptureGateRejectsStalePartialAndErrorStates()
 	{
 		var gate = new BobsBuddyCaptureGate(); gate.BeginCombat();
-		False(gate.TryCapture("Combat", "None", true, "60%", "10%", "30%", CultureInfo.InvariantCulture, out _), "old valid values are not accepted before reset");
-		False(gate.TryCapture("Combat", "None", true, "-", "-", "-", CultureInfo.InvariantCulture, out _), "reset arms the combat");
-		False(gate.TryCapture("CombatPartial", "None", true, "60%", "10%", "30%", CultureInfo.InvariantCulture, out _), "partial Duo state rejected");
-		False(gate.TryCapture("Combat", "NotEnoughData", true, "60%", "10%", "30%", CultureInfo.InvariantCulture, out _), "error state rejected");
-		True(gate.TryCapture("Combat", "None", true, "60%", "10%", "30%", CultureInfo.InvariantCulture, out var captured), "complete result accepted"); Near(.6, captured!.Win, "captured result");
-		False(gate.TryCapture("Combat", "None", true, "60%", "10%", "30%", CultureInfo.InvariantCulture, out _), "duplicate notification rejected");
-		True(gate.TryCapture("Combat", "None", true, "70%", "10%", "20%", CultureInfo.InvariantCulture, out _), "rerun accepted");
+		False(gate.TryCapture(BobsBuddyCaptureState.Combat, true, true, "60%", "10%", "30%", CultureInfo.InvariantCulture, out _), "old valid values are not accepted before reset");
+		False(gate.TryCapture(BobsBuddyCaptureState.Combat, true, true, "-", "-", "-", CultureInfo.InvariantCulture, out _), "reset arms the combat");
+		False(gate.TryCapture(BobsBuddyCaptureState.Unsupported, true, true, "60%", "10%", "30%", CultureInfo.InvariantCulture, out _), "partial Duo state rejected");
+		False(gate.TryCapture(BobsBuddyCaptureState.Combat, false, true, "60%", "10%", "30%", CultureInfo.InvariantCulture, out _), "error state rejected");
+		True(gate.TryCapture(BobsBuddyCaptureState.Combat, true, true, "60%", "10%", "30%", CultureInfo.InvariantCulture, out var captured), "complete result accepted"); Near(.6, captured!.Win, "captured result");
+		False(gate.TryCapture(BobsBuddyCaptureState.Combat, true, true, "60%", "10%", "30%", CultureInfo.InvariantCulture, out _), "duplicate notification rejected");
+		True(gate.TryCapture(BobsBuddyCaptureState.Combat, true, true, "70%", "10%", "20%", CultureInfo.InvariantCulture, out _), "rerun accepted");
 
 		var reconnect = new BobsBuddyCaptureGate(); reconnect.BeginCombat(true);
-		False(reconnect.TryCapture("Combat", "None", true, "55%", "10%", "35%", CultureInfo.InvariantCulture, out _, guardedCheck: false), "a complete notification without the reset is remembered but not accepted");
-		True(reconnect.TryCapture("Combat", "None", true, "55%", "10%", "35%", CultureInfo.InvariantCulture, out var recovered, guardedCheck: true), "a later guarded check confirms the remembered result"); Near(.55, recovered!.Win, "recovered result after a missed reset notification");
+		False(reconnect.TryCapture(BobsBuddyCaptureState.Combat, true, true, "55%", "10%", "35%", CultureInfo.InvariantCulture, out _, guardedCheck: false), "a complete notification without the reset is remembered but not accepted");
+		True(reconnect.TryCapture(BobsBuddyCaptureState.Combat, true, true, "55%", "10%", "35%", CultureInfo.InvariantCulture, out var recovered, guardedCheck: true), "a later guarded check confirms the remembered result"); Near(.55, recovered!.Win, "recovered result after a missed reset notification");
 		var changed = new BobsBuddyCaptureGate(); changed.BeginCombat(true);
-		False(changed.TryCapture("Combat", "None", true, "60%", "10%", "30%", CultureInfo.InvariantCulture, out _, guardedCheck: true), "first guarded value can be stale");
-		False(changed.TryCapture("Combat", "None", true, "70%", "10%", "20%", CultureInfo.InvariantCulture, out _, guardedCheck: true), "a changed guarded value becomes a new candidate instead of being published");
-		True(changed.TryCapture("Combat", "None", true, "70%", "10%", "20%", CultureInfo.InvariantCulture, out var refreshed, guardedCheck: true), "the changed candidate requires a second identical guarded check"); Near(.70, refreshed!.Win, "stable refreshed recovery result");
+		False(changed.TryCapture(BobsBuddyCaptureState.Combat, true, true, "60%", "10%", "30%", CultureInfo.InvariantCulture, out _, guardedCheck: true), "first guarded value can be stale");
+		False(changed.TryCapture(BobsBuddyCaptureState.Combat, true, true, "70%", "10%", "20%", CultureInfo.InvariantCulture, out _, guardedCheck: true), "a changed guarded value becomes a new candidate instead of being published");
+		True(changed.TryCapture(BobsBuddyCaptureState.Combat, true, true, "70%", "10%", "20%", CultureInfo.InvariantCulture, out var refreshed, guardedCheck: true), "the changed candidate requires a second identical guarded check"); Near(.70, refreshed!.Win, "stable refreshed recovery result");
 		var midCombatReconnect = new BobsBuddyCaptureGate(); midCombatReconnect.BeginCombat(); midCombatReconnect.EnableGuardedRecovery();
-		False(midCombatReconnect.TryCapture("Combat", "None", true, "65%", "5%", "30%", CultureInfo.InvariantCulture, out _, guardedCheck: true), "mid-combat recovery starts with a guarded candidate");
-		True(midCombatReconnect.TryCapture("Combat", "None", true, "65%", "5%", "30%", CultureInfo.InvariantCulture, out _, guardedCheck: true), "mid-combat recovery also succeeds after a stable second check");
-		midCombatReconnect.EndCombat(); False(midCombatReconnect.TryCapture("Combat", "None", true, "75%", "5%", "20%", CultureInfo.InvariantCulture, out _, guardedCheck: true), "values from a later combat cannot pass through a closed prior-turn gate");
+		False(midCombatReconnect.TryCapture(BobsBuddyCaptureState.Combat, true, true, "65%", "5%", "30%", CultureInfo.InvariantCulture, out _, guardedCheck: true), "mid-combat recovery starts with a guarded candidate");
+		True(midCombatReconnect.TryCapture(BobsBuddyCaptureState.Combat, true, true, "65%", "5%", "30%", CultureInfo.InvariantCulture, out _, guardedCheck: true), "mid-combat recovery also succeeds after a stable second check");
+		midCombatReconnect.EndCombat(); False(midCombatReconnect.TryCapture(BobsBuddyCaptureState.Combat, true, true, "75%", "5%", "20%", CultureInfo.InvariantCulture, out _, guardedCheck: true), "values from a later combat cannot pass through a closed prior-turn gate");
 		var late = new BobsBuddyCaptureGate(); late.BeginCombat(true);
-		False(late.TryCapture("Shopping", "None", true, "100%", "0%", "0%", CultureInfo.InvariantCulture, out _, guardedCheck: true), "shopping results are rejected outside explicit post-combat recovery");
-		False(late.TryCapture("Shopping", "None", true, "100%", "0%", "0%", CultureInfo.InvariantCulture, out _, guardedCheck: true, allowPostCombatState: true), "first late shopping value only seeds guarded confirmation");
-		True(late.TryCapture("Shopping", "None", true, "100%", "0%", "0%", CultureInfo.InvariantCulture, out var lateResult, guardedCheck: true, allowPostCombatState: true), "stable late shopping result is accepted for the bound turn"); Near(1, lateResult!.Win, "late 100-percent win");
-		var partialLate = new BobsBuddyCaptureGate(); partialLate.BeginCombat(true); False(partialLate.TryCapture("ShoppingAfterPartial", "None", true, "100%", "0%", "0%", CultureInfo.InvariantCulture, out _, guardedCheck: true, allowPostCombatState: true), "partial Duo shopping results remain rejected");
+		False(late.TryCapture(BobsBuddyCaptureState.Shopping, true, true, "100%", "0%", "0%", CultureInfo.InvariantCulture, out _, guardedCheck: true), "shopping results are rejected outside explicit post-combat recovery");
+		False(late.TryCapture(BobsBuddyCaptureState.Shopping, true, true, "100%", "0%", "0%", CultureInfo.InvariantCulture, out _, guardedCheck: true, allowPostCombatState: true), "first late shopping value only seeds guarded confirmation");
+		True(late.TryCapture(BobsBuddyCaptureState.Shopping, true, true, "100%", "0%", "0%", CultureInfo.InvariantCulture, out var lateResult, guardedCheck: true, allowPostCombatState: true), "stable late shopping result is accepted for the bound turn"); Near(1, lateResult!.Win, "late 100-percent win");
+		var partialLate = new BobsBuddyCaptureGate(); partialLate.BeginCombat(true); False(partialLate.TryCapture(BobsBuddyCaptureState.Unsupported, true, true, "100%", "0%", "0%", CultureInfo.InvariantCulture, out _, guardedCheck: true, allowPostCombatState: true), "partial Duo shopping results remain rejected");
 	}
 
 	private static void PostCombatRecoveryAcceptsStableCombatOrShoppingData()
 	{
 		var gate = new BobsBuddyCaptureGate(); gate.BeginCombat(true);
-		False(gate.TryCapture("Combat", "None", true, "-", "-", "-", CultureInfo.InvariantCulture, out _), "combat placeholder arms the current turn");
-		False(gate.TryCapture("Shopping", "None", true, "100%", "0%", "0%", CultureInfo.InvariantCulture, out _, guardedCheck: true, allowPostCombatState: true), "first post-combat value is only a candidate even after a reset");
-		True(gate.TryCapture("Shopping", "None", true, "100%", "0%", "0%", CultureInfo.InvariantCulture, out _, guardedCheck: true, allowPostCombatState: true), "stable post-combat value is accepted");
+		False(gate.TryCapture(BobsBuddyCaptureState.Combat, true, true, "-", "-", "-", CultureInfo.InvariantCulture, out _), "combat placeholder arms the current turn");
+		False(gate.TryCapture(BobsBuddyCaptureState.Shopping, true, true, "100%", "0%", "0%", CultureInfo.InvariantCulture, out _, guardedCheck: true, allowPostCombatState: true), "first post-combat value is only a candidate even after a reset");
+		True(gate.TryCapture(BobsBuddyCaptureState.Shopping, true, true, "100%", "0%", "0%", CultureInfo.InvariantCulture, out _, guardedCheck: true, allowPostCombatState: true), "stable post-combat value is accepted");
 		var oldTurn = new BobsBuddyCaptureGate(); oldTurn.BeginCombat(true);
-		False(oldTurn.TryCapture("Combat", "None", true, "-", "-", "-", CultureInfo.InvariantCulture, out _), "old turn reset observed");
-		False(oldTurn.TryCapture("Combat", "None", true, "70%", "10%", "20%", CultureInfo.InvariantCulture, out _, guardedCheck: true, allowPostCombatState: true), "first late Combat-state value is only a candidate");
-		True(oldTurn.TryCapture("Combat", "None", true, "70%", "10%", "20%", CultureInfo.InvariantCulture, out var lateCombatResult, guardedCheck: true, allowPostCombatState: true), "stable late Combat-state value is accepted after the game combat phase ended");
+		False(oldTurn.TryCapture(BobsBuddyCaptureState.Combat, true, true, "-", "-", "-", CultureInfo.InvariantCulture, out _), "old turn reset observed");
+		False(oldTurn.TryCapture(BobsBuddyCaptureState.Combat, true, true, "70%", "10%", "20%", CultureInfo.InvariantCulture, out _, guardedCheck: true, allowPostCombatState: true), "first late Combat-state value is only a candidate");
+		True(oldTurn.TryCapture(BobsBuddyCaptureState.Combat, true, true, "70%", "10%", "20%", CultureInfo.InvariantCulture, out var lateCombatResult, guardedCheck: true, allowPostCombatState: true), "stable late Combat-state value is accepted after the game combat phase ended");
 		Near(.70, lateCombatResult!.Win, "late Combat-state win chance");
 	}
 
@@ -269,10 +275,17 @@ internal static class Program
 		var comparable = AnomalyClassifier.Summarize(tracker.Rows); Equal(2, comparable.SampleSize, "summary excludes rows that are not comparable on both sides"); Equal(1, comparable.ActualWins, "actual summary uses the same eligible rows as expected");
 	}
 
+	private static void OverlayPositionRemainsStableWhenWidthChanges()
+	{
+		Near(25, OverlayPositionPolicy.HorizontalOffsetFromLeft(OverlaySide.Left, 1920, 300, 25), "left placement stores the left coordinate");
+		Near(100, OverlayPositionPolicy.HorizontalOffsetFromLeft(OverlaySide.Right, 1920, 300, 1520), "right placement derives its offset from the preserved left coordinate");
+		Near(200, OverlayPositionPolicy.HorizontalOffsetFromLeft(OverlaySide.Right, 1920, 200, 1520), "changing overlay width keeps the same left coordinate by changing the right offset");
+	}
+
 	private static void VersionAndMovementDefaultsAreStable()
 	{
-		Equal("1.1", PluginVersion.Display, "short displayed version"); Equal("1.1", PluginVersion.LocalRelease, "stable release label"); Equal("1.1", PluginVersion.Hdt.ToString(), "HDT version has no trailing zeroes");
-		Equal("1.1", typeof(PluginVersion).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion, "assembly informational version has no source revision suffix");
+		Equal("1.2", PluginVersion.Display, "short displayed version"); Equal("1.2", PluginVersion.LocalRelease, "stable release label"); Equal("1.2", PluginVersion.Hdt.ToString(), "HDT version has no trailing zeroes");
+		Equal("1.2", typeof(PluginVersion).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion, "assembly informational version has no source revision suffix");
 		var settings = new PluginSettings(); True(settings.LockOverlayPosition, "overlay movement is locked by default"); True(settings.ShowAnomalyStatus, "anomaly status is shown by default");
 		False(settings.ShowDamageColumn, "combat damage column is hidden by default"); True(settings.ShowHeroColumn, "hero column is shown by default");
 		True(settings.StrictAnomalies, "strict anomaly mode is enabled by default");
@@ -286,10 +299,42 @@ internal static class Program
 		Near(51, settings.UnusualExpectedPercent, "light anomaly expected-result threshold"); Near(80, settings.VeryUnusualExpectedPercent, "strong anomaly expected-result threshold"); Near(95, settings.ExtremeExpectedPercent, "extreme anomaly expected-result threshold");
 		False(settings.HideWhenHearthstoneNotForeground, "focus hiding is disabled by default");
 		var copy = new PluginSettings { LockOverlayPosition = false, HideWhenHearthstoneNotForeground = false, BackgroundOpacity = .35 }; settings.CopyFrom(copy); False(settings.LockOverlayPosition, "movement lock is copied with visual settings"); False(settings.HideWhenHearthstoneNotForeground, "focus behavior is copied with visual settings"); Near(.35, settings.BackgroundOpacity, "background opacity is copied");
-		var bounds = new PluginSettings { HorizontalOffset = 900, VeryUnusualExpectedPercent = 100 }; bounds.Normalize(); Near(500, bounds.HorizontalOffset, "finite visual values saturate at the nearest boundary"); Near(99, bounds.VeryUnusualExpectedPercent, "the strong anomaly threshold maximum does not jump back to its default");
+		var bounds = new PluginSettings { HorizontalOffset = 900, UnusualExpectedPercent = 50, VeryUnusualExpectedPercent = 100 }; bounds.Normalize(); Near(500, bounds.HorizontalOffset, "finite visual values saturate at the nearest boundary"); Near(51, bounds.UnusualExpectedPercent, "the light anomaly threshold cannot be set to an ineffective 50 percent"); Near(99, bounds.VeryUnusualExpectedPercent, "the strong anomaly threshold maximum does not jump back to its default");
 		var invalid = new PluginSettings { Scale = double.NaN, BackgroundOpacity = double.PositiveInfinity }; invalid.Normalize(); Near(1, invalid.Scale, "non-finite settings use a safe fallback"); Near(1, invalid.BackgroundOpacity, "non-finite background opacity uses a safe fallback");
 		Throws<ArgumentOutOfRangeException>(() => new SimulationProbabilities(double.NaN, 0, 1), "probability model rejects NaN");
 		Throws<ArgumentOutOfRangeException>(() => new SimulationProbabilities(.8, .8, 0), "probability model rejects an invalid total");
+	}
+
+	private static void VersionParsingAndManualUpdateCheck()
+	{
+		True(ReleaseVersion.TryParse("v2.8", out var shortVersion), "v-prefixed short release tag is accepted");
+		True(ReleaseVersion.TryParse("2.8.1.0", out var longVersion), "four-part release tag is accepted");
+		True(ReleaseVersion.TryParse("2.8.1-rc.2", out var prerelease), "SemVer prerelease is accepted");
+		True(longVersion!.CompareTo(shortVersion) > 0, "missing version parts compare as zero");
+		True(longVersion.CompareTo(prerelease) > 0, "stable release sorts after prerelease");
+		False(ReleaseVersion.TryParse("release-2.8", out _), "unsupported tag text is rejected");
+		True(VersionChecker.IsValidRepository("numbereleven-a/HDT-HistoryCombatSimulation"), "configured owner and repository are accepted");
+		False(VersionChecker.IsValidRepository("api.github.com/repos/owner/repo"), "repository override cannot replace the API host");
+
+		var handler = new UpdateHandler();
+		var oldRepository = Environment.GetEnvironmentVariable("HDT_HISTORYCOMBATSIMULATION_UPDATE_REPOSITORY");
+		var oldToken = Environment.GetEnvironmentVariable("HDT_HISTORYCOMBATSIMULATION_UPDATE_TOKEN");
+		try
+		{
+			Environment.SetEnvironmentVariable("HDT_HISTORYCOMBATSIMULATION_UPDATE_REPOSITORY", VersionChecker.DefaultRepository);
+			Environment.SetEnvironmentVariable("HDT_HISTORYCOMBATSIMULATION_UPDATE_TOKEN", "local-test-token");
+			var checker = new VersionChecker(new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(2) });
+			var result = checker.CheckAsync(new Version(1, 1, 2), CancellationToken.None).GetAwaiter().GetResult();
+			True(result.UpdateAvailable, "newer GitHub release is reported");
+			Equal("1.2", result.Latest.ToString(), "latest tag is displayed without v");
+			Equal("api.github.com", handler.Host, "update request is restricted to GitHub API");
+			Equal("Bearer", handler.AuthorizationScheme, "optional token is attached only to the request");
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable("HDT_HISTORYCOMBATSIMULATION_UPDATE_REPOSITORY", oldRepository);
+			Environment.SetEnvironmentVariable("HDT_HISTORYCOMBATSIMULATION_UPDATE_TOKEN", oldToken);
+		}
 	}
 
 	private static CombatSnapshot Snapshot(int turn, int opponent, bool ghost = false) => new CombatSnapshot(turn, opponent, opponent + 100, "TB_BaconShop_HERO_PH", ghost, 40, 40);
@@ -299,4 +344,20 @@ internal static class Program
 	private static void Same(object? expected, object? actual, string name) { if(!ReferenceEquals(expected, actual)) throw new InvalidOperationException(name); }
 	private static void Near(double expected, double actual, string name) { if(Math.Abs(expected - actual) > .00001) throw new InvalidOperationException(name + ": expected " + expected + ", actual " + actual); }
 	private static void Throws<T>(Action action, string name) where T : Exception { try { action(); } catch(T) { return; } throw new InvalidOperationException(name); }
+
+	private sealed class UpdateHandler : HttpMessageHandler
+	{
+		public string? Host { get; private set; }
+		public string? AuthorizationScheme { get; private set; }
+
+		protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+		{
+			Host = request.RequestUri?.Host;
+			AuthorizationScheme = request.Headers.Authorization?.Scheme;
+			return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+			{
+				Content = new StringContent("{\"tag_name\":\"v1.2\"}")
+			});
+		}
+	}
 }

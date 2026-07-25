@@ -34,6 +34,7 @@ namespace HistoryCombatSimulation
 		private IReadOnlyList<CombatRow> _lastRows = Array.Empty<CombatRow>();
 		private PluginSettings? _lastSettings;
 		private bool _attached;
+		private Canvas? _canvas;
 		private bool _changingScroll;
 		private int _lastRowCount;
 		private int? _visibleRows;
@@ -43,6 +44,11 @@ namespace HistoryCombatSimulation
 		private double _dragLeft;
 		private double _dragTop;
 		private bool _collapsed;
+		private bool _hasAppliedPosition;
+		private OverlaySide _appliedSide;
+		private double _appliedHorizontalOffset;
+		private double _appliedVerticalOffset;
+		private double _appliedCanvasWidth = double.NaN;
 		public event EventHandler? PositionChanged;
 
 		public HistoryOverlay()
@@ -56,14 +62,44 @@ namespace HistoryCombatSimulation
 			_collapse.Click += (_, __) => ToggleCollapsed();
 		}
 
-		public void Attach()
+		public bool Attach()
 		{
-			if(_attached) return; HdtApi.OverlayCanvas.Children.Add(_layer); OverlayExtensions.SetIsOverlayHitTestVisible(_scroll, true); OverlayExtensions.SetIsOverlayHitTestVisible(_collapse, true); OverlayExtensions.SetIsOverlayHoverVisible(_visual, true); _attached = true;
+			var canvas = HdtApi.OverlayCanvas;
+			if(canvas == null)
+				return false;
+			if(_attached && ReferenceEquals(_canvas, canvas) && canvas.Children.Contains(_layer))
+				return false;
+			_canvas?.Children.Remove(_layer);
+			if(!canvas.Children.Contains(_layer))
+				canvas.Children.Add(_layer);
+			OverlayExtensions.SetIsOverlayHitTestVisible(_scroll, true);
+			OverlayExtensions.SetIsOverlayHitTestVisible(_collapse, true);
+			OverlayExtensions.SetIsOverlayHoverVisible(_visual, true);
+			_canvas = canvas;
+			_attached = true;
+			return true;
 		}
 
 		public void Detach()
 		{
-			if(!_attached) return; OverlayExtensions.SetIsOverlayHitTestVisible(_scroll, false); OverlayExtensions.SetIsOverlayHitTestVisible(_collapse, false); OverlayExtensions.SetIsOverlayHitTestVisible(_visual, false); OverlayExtensions.SetIsOverlayHoverVisible(_visual, false); HdtApi.OverlayCanvas.Children.Remove(_layer); _rows.Children.Clear(); _rowVisuals.Clear(); _layer.Visibility = Visibility.Collapsed; _attached = false;
+			if(!_attached)
+				return;
+			OverlayExtensions.SetIsOverlayHitTestVisible(_scroll, false);
+			OverlayExtensions.SetIsOverlayHitTestVisible(_collapse, false);
+			OverlayExtensions.SetIsOverlayHitTestVisible(_visual, false);
+			OverlayExtensions.SetIsOverlayHoverVisible(_visual, false);
+			_canvas?.Children.Remove(_layer);
+			_changingScroll = true;
+			_scroll.Value = 0;
+			_changingScroll = false;
+			_rows.Children.Clear();
+			_rowVisuals.Clear();
+			_lastRows = Array.Empty<CombatRow>();
+			_lastSettings = null;
+			_layer.Visibility = Visibility.Collapsed;
+			_canvas = null;
+			_attached = false;
+			_hasAppliedPosition = false;
 		}
 
 		public void Hide() => _layer.Visibility = Visibility.Collapsed;
@@ -71,8 +107,29 @@ namespace HistoryCombatSimulation
 		public void Update(IReadOnlyList<CombatRow> rows, PluginSettings settings, bool shouldShow)
 		{
 			if(!_attached || !settings.Enabled || !shouldShow) { Hide(); return; }
+			var previousLeft = Canvas.GetLeft(_layer);
+			var previousTop = Canvas.GetTop(_layer);
+			var positionInputChanged = !_hasAppliedPosition
+				|| _appliedSide != settings.Side
+				|| Math.Abs(_appliedHorizontalOffset - settings.HorizontalOffset) >= .01
+				|| Math.Abs(_appliedVerticalOffset - settings.VerticalOffset) >= .01;
+			var canvasWidth = _canvas?.ActualWidth ?? double.NaN;
+			var canvasWidthUnchanged = IsFinite(canvasWidth) && Math.Abs(_appliedCanvasWidth - canvasWidth) < .1;
 			var preview = rows.Count == 0 && !settings.LockOverlayPosition;
-			if(rows.Count == 0 && !preview) { _lastRowCount = 0; _visibleRows = null; _scroll.Value = 0; _rows.Children.Clear(); _rowVisuals.Clear(); Hide(); return; }
+			if(rows.Count == 0 && !preview)
+			{
+				_lastRowCount = 0;
+				_visibleRows = null;
+				_changingScroll = true;
+				_scroll.Value = 0;
+				_changingScroll = false;
+				_rows.Children.Clear();
+				_rowVisuals.Clear();
+				_lastRows = Array.Empty<CombatRow>();
+				_lastSettings = null;
+				Hide();
+				return;
+			}
 			var displayRows = preview ? _previewRows : rows;
 			settings.Normalize(); _lastRows = displayRows; _lastSettings = settings;
 			_title.ToolTip = settings.StrictAnomalies ? "Strict anomalies: one unique most likely result did not happen. ! for any miss, !! from 80%, !!! from 95%. Equal highest chances are not marked." : "Anomaly markers appear when the most likely result did not happen: ! above the configured light threshold, !! above the strong threshold, !!! above the extreme threshold.";
@@ -96,20 +153,54 @@ namespace HistoryCombatSimulation
 			if(settings.ShowMatchSummary && settings.Layout == HistoryLayout.Normal)
 			{
 				var s = AnomalyClassifier.Summarize(displayRows);
-				_summary.Text = string.Format(CultureInfo.CurrentUICulture, "N {0}   ACTUAL / EXPECTED   W {1}/{2:0.0}   T {3}/{4:0.0}   L {5}/{6:0.0}", s.SampleSize, s.ActualWins, s.ExpectedWins, s.ActualTies, s.ExpectedTies, s.ActualLosses, s.ExpectedLosses);
+				_summary.Text = string.Format(CultureInfo.CurrentCulture, "N {0}   ACTUAL / EXPECTED   W {1}/{2:0.0}   T {3}/{4:0.0}   L {5}/{6:0.0}", s.SampleSize, s.ActualWins, s.ExpectedWins, s.ActualTies, s.ExpectedTies, s.ActualLosses, s.ExpectedLosses);
 			}
 			var wasAtNewest = Math.Abs(_scroll.Value - _scroll.Maximum) < .5;
 			_changingScroll = true; _scroll.Maximum = Math.Max(0, displayRows.Count - settings.VisibleRows); _scroll.ViewportSize = settings.VisibleRows;
 			if(HistoryViewportPolicy.ShouldScrollToNewest(_lastRowCount, displayRows.Count, _visibleRows, settings.VisibleRows, wasAtNewest)) _scroll.Value = _scroll.Maximum;
 			_scroll.Visibility = displayRows.Count > settings.VisibleRows ? Visibility.Visible : Visibility.Collapsed; _changingScroll = false;
-			_lastRowCount = displayRows.Count; _visibleRows = settings.VisibleRows; RenderViewport(displayRows, settings); Position(settings); ApplyInteraction(settings); _background.Color = Color.FromArgb((byte)Math.Round(settings.BackgroundOpacity * 255), 18, 20, 23); _layer.Opacity = settings.Opacity; _layer.RenderTransform = new ScaleTransform(settings.Scale, settings.Scale); _layer.Visibility = Visibility.Visible;
+			_lastRowCount = displayRows.Count; _visibleRows = settings.VisibleRows; RenderViewport(displayRows, settings);
+			var newScaledWidth = _layer.Width * settings.Scale;
+			if(!positionInputChanged && canvasWidthUnchanged && IsFinite(previousLeft))
+				PreserveTopLeft(settings, previousLeft, previousTop, newScaledWidth);
+			else
+				Position(settings);
+			RememberAppliedPosition(settings);
+			ApplyInteraction(settings); _background.Color = Color.FromArgb((byte)Math.Round(settings.BackgroundOpacity * 255), 18, 20, 23); _layer.Opacity = settings.Opacity; _layer.RenderTransform = new ScaleTransform(settings.Scale, settings.Scale); _layer.Visibility = Visibility.Visible;
 		}
+
+		private void PreserveTopLeft(PluginSettings settings, double left, double top, double scaledWidth)
+		{
+			var canvas = _canvas;
+			if(canvas == null || canvas.ActualWidth <= 0)
+				return;
+			Canvas.SetLeft(_layer, left);
+			Canvas.SetTop(_layer, IsFinite(top) ? top : settings.VerticalOffset);
+			var oldOffset = settings.HorizontalOffset;
+			settings.HorizontalOffset = OverlayPositionPolicy.HorizontalOffsetFromLeft(settings.Side, canvas.ActualWidth, scaledWidth, left);
+			settings.Normalize();
+			if(Math.Abs(oldOffset - settings.HorizontalOffset) >= .01)
+				PositionChanged?.Invoke(this, EventArgs.Empty);
+		}
+
+		private void RememberAppliedPosition(PluginSettings settings)
+		{
+			_hasAppliedPosition = true;
+			_appliedSide = settings.Side;
+			_appliedHorizontalOffset = settings.HorizontalOffset;
+			_appliedVerticalOffset = settings.VerticalOffset;
+			_appliedCanvasWidth = _canvas?.ActualWidth ?? double.NaN;
+		}
+
+		private static bool IsFinite(double value) => !double.IsNaN(value) && !double.IsInfinity(value);
 
 		private void RenderViewport(IReadOnlyList<CombatRow> rows, PluginSettings settings)
 		{
 			var start = Math.Max(0, Math.Min((int)Math.Round(_scroll.Value), Math.Max(0, rows.Count - settings.VisibleRows)));
 			var end = Math.Min(rows.Count, start + settings.VisibleRows);
-			for(var i = 0; i < rows.Count; i++) _rowVisuals[rows[i]].Grid.Visibility = i >= start && i < end ? Visibility.Visible : Visibility.Collapsed;
+			for(var i = 0; i < rows.Count; i++)
+				if(_rowVisuals.TryGetValue(rows[i], out var visual))
+					visual.Grid.Visibility = i >= start && i < end ? Visibility.Visible : Visibility.Collapsed;
 			var newer = rows.Count - end;
 			_older.Visibility = start > 0 || newer > 0 ? Visibility.Visible : Visibility.Collapsed;
 			_older.Text = start > 0 && newer > 0 ? "+" + start + " older  •  +" + newer + " newer" : start > 0 ? "+" + start + " older" : newer > 0 ? "+" + newer + " newer" : string.Empty;
@@ -121,7 +212,12 @@ namespace HistoryCombatSimulation
 
 		private void Position(PluginSettings settings)
 		{
-			var canvas = HdtApi.OverlayCanvas; var width = canvas.ActualWidth; if(width <= 0) return;
+			var canvas = _canvas;
+			if(canvas == null)
+				return;
+			var width = canvas.ActualWidth;
+			if(width <= 0)
+				return;
 			_visual.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
 			var scaledWidth = (_visual.DesiredSize.Width + (_scroll.Visibility == Visibility.Visible ? 10 : 0)) * settings.Scale;
 			var left = settings.Side == OverlaySide.Left ? settings.HorizontalOffset : width - scaledWidth - settings.HorizontalOffset;
@@ -135,8 +231,15 @@ namespace HistoryCombatSimulation
 
 		private void BeginDrag(object sender, MouseButtonEventArgs e)
 		{
-			if(_lastSettings == null || _lastSettings.LockOverlayPosition || _collapse.IsMouseOver) return;
-			_dragging = true; _dragStart = e.GetPosition(HdtApi.OverlayCanvas); _dragLeft = Canvas.GetLeft(_layer); _dragTop = Canvas.GetTop(_layer); _visual.CaptureMouse(); e.Handled = true;
+			var canvas = _canvas;
+			if(canvas == null || _lastSettings == null || _lastSettings.LockOverlayPosition || _collapse.IsMouseOver)
+				return;
+			_dragging = true;
+			_dragStart = e.GetPosition(canvas);
+			_dragLeft = Canvas.GetLeft(_layer);
+			_dragTop = Canvas.GetTop(_layer);
+			_visual.CaptureMouse();
+			e.Handled = true;
 		}
 
 		private void ToggleCollapsed()
@@ -157,10 +260,12 @@ namespace HistoryCombatSimulation
 
 		private void Drag(object sender, MouseEventArgs e)
 		{
-			if(!_dragging || _lastSettings == null || e.LeftButton != MouseButtonState.Pressed) return;
-			var current = e.GetPosition(HdtApi.OverlayCanvas); var left = _dragLeft + current.X - _dragStart.X; var top = _dragTop + current.Y - _dragStart.Y;
+			var canvas = _canvas;
+			if(!_dragging || _lastSettings == null || canvas == null || e.LeftButton != MouseButtonState.Pressed)
+				return;
+			var current = e.GetPosition(canvas); var left = _dragLeft + current.X - _dragStart.X; var top = _dragTop + current.Y - _dragStart.Y;
 			Canvas.SetLeft(_layer, left); Canvas.SetTop(_layer, top); _lastSettings.VerticalOffset = top;
-			var scaledWidth = _layer.Width * _lastSettings.Scale; _lastSettings.HorizontalOffset = _lastSettings.Side == OverlaySide.Left ? left : HdtApi.OverlayCanvas.ActualWidth - scaledWidth - left;
+			var scaledWidth = _layer.Width * _lastSettings.Scale; _lastSettings.HorizontalOffset = OverlayPositionPolicy.HorizontalOffsetFromLeft(_lastSettings.Side, canvas.ActualWidth, scaledWidth, left);
 			e.Handled = true;
 		}
 
@@ -258,7 +363,7 @@ namespace HistoryCombatSimulation
 
 			public void Update(CombatRow row, PluginSettings settings)
 			{
-				var culture = CultureInfo.CurrentUICulture; Turn.Text = row.Snapshot.Turn.ToString(culture); var p = row.Probabilities;
+				var culture = CultureInfo.CurrentCulture; Turn.Text = row.Snapshot.Turn.ToString(culture); var p = row.Probabilities;
 				if(Layout == HistoryLayout.Normal) { Win!.Text = HistoryFormatting.NormalProbability(p?.Win, culture); Tie!.Text = HistoryFormatting.NormalProbability(p?.Tie, culture); Loss!.Text = HistoryFormatting.NormalProbability(p?.Loss, culture); }
 				else Compact!.Text = HistoryFormatting.CompactProbabilities(p, culture);
 				if(Damage != null) { var damage = row.CombatDamage.GetValueOrDefault(); Damage.Text = HistoryFormatting.CombatDamage(row.CombatDamage, culture); Damage.Foreground = !row.CombatDamage.HasValue ? Brushes.LightGray : damage > 0 ? Brushes.LightGreen : damage < 0 ? Brushes.Salmon : Brushes.Khaki; }

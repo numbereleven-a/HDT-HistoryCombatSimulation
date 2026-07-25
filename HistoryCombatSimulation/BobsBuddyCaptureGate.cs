@@ -3,6 +3,14 @@ using System.Globalization;
 
 namespace HistoryCombatSimulation
 {
+	public enum BobsBuddyCaptureState
+	{
+		Unsupported,
+		Combat,
+		Shopping,
+		GameOver
+	}
+
 	public sealed class BobsBuddyCaptureGate
 	{
 		private bool _resetObserved;
@@ -15,13 +23,13 @@ namespace HistoryCombatSimulation
 		public void EnableGuardedRecovery() { _guardedRecovery = true; _recoveryCandidate = null; _stableRecoveryChecks = 0; }
 		public void EndCombat() => BeginCombat();
 
-		public bool TryCapture(string state, string errorState, bool percentagesVisible, string? win, string? tie, string? loss, CultureInfo culture, out SimulationProbabilities? result, bool guardedCheck = false, bool allowPostCombatState = false)
+		public bool TryCapture(BobsBuddyCaptureState state, bool errorFree, bool percentagesVisible, string? win, string? tie, string? loss, CultureInfo culture, out SimulationProbabilities? result, bool guardedCheck = false, bool allowPostCombatState = false)
 		{
 			result = null;
-			var combatState = string.Equals(state, "Combat", StringComparison.Ordinal);
-			var postCombatState = string.Equals(state, "Shopping", StringComparison.Ordinal) || string.Equals(state, "GameOver", StringComparison.Ordinal);
+			var combatState = state == BobsBuddyCaptureState.Combat;
+			var postCombatState = state == BobsBuddyCaptureState.Shopping || state == BobsBuddyCaptureState.GameOver;
 			var validState = allowPostCombatState ? combatState || postCombatState : combatState;
-			if(!validState || !string.Equals(errorState, "None", StringComparison.Ordinal))
+			if(!validState || !errorFree)
 				return false;
 			if(IsPlaceholder(win) || IsPlaceholder(tie) || IsPlaceholder(loss))
 			{

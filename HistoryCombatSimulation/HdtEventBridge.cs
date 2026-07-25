@@ -1,6 +1,5 @@
 using System;
 using Hearthstone_Deck_Tracker.API;
-using Hearthstone_Deck_Tracker.Utility.Logging;
 
 namespace HistoryCombatSimulation
 {
@@ -16,6 +15,8 @@ namespace HistoryCombatSimulation
 			{
 				_active = new WeakReference<HistoryCombatSimulationPlugin>(plugin);
 				if(_subscribed) return;
+				// HDT's callback lists have no supported removal API. Subscribe once for
+				// the process lifetime and route events through a weak active-instance reference.
 				GameEvents.OnEntityWillTakeDamage.Add(HandleDamage);
 				GameEvents.OnGameWon.Add(HandleWin);
 				GameEvents.OnGameLost.Add(HandleLoss);
@@ -47,7 +48,7 @@ namespace HistoryCombatSimulation
 			lock(Sync) _active?.TryGetTarget(out plugin);
 			if(plugin?.IsLoaded != true) return;
 			try { action(plugin); }
-			catch(Exception ex) { Log.Error("History Combat Simulation: HDT event handling failed (" + ex.GetType().Name + ")."); }
+			catch(Exception ex) { PluginLog.Error("HDT event handling failed", ex); }
 		}
 	}
 }

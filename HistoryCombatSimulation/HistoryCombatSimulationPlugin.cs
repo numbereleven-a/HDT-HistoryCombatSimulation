@@ -5,7 +5,6 @@ using System.Windows.Controls;
 using Hearthstone_Deck_Tracker;
 using Hearthstone_Deck_Tracker.API;
 using Hearthstone_Deck_Tracker.Plugins;
-using Hearthstone_Deck_Tracker.Utility.Logging;
 
 namespace HistoryCombatSimulation
 {
@@ -52,6 +51,10 @@ namespace HistoryCombatSimulation
 		private bool? _lastFocusAllowsOverlay;
 		private double _lastCanvasWidth = double.NaN;
 		private double _lastCanvasHeight = double.NaN;
+		private bool _trackingEnabled;
+		private bool _waitingForNextGameStart;
+		private int? _skippedCombatTurn;
+		private bool _updateFailureLogged;
 
 		internal bool IsLoaded => _loaded;
 
@@ -64,15 +67,30 @@ namespace HistoryCombatSimulation
 
 		public void OnLoad()
 		{
-			_settings = PluginSettings.Load(); _tracker.SetThresholds(_settings.GetThresholds(), _settings.StrictAnomalies); _tracker.Changed += OnHistoryChanged; _bobsBuddy.ResultAvailable += OnSimulationResult; _overlay.PositionChanged += OnOverlayPositionChanged;
-			if(_enabledMenuItem != null) _enabledMenuItem.IsChecked = _settings.Enabled; if(_lockMenuItem != null) _lockMenuItem.IsChecked = _settings.LockOverlayPosition;
-			_loaded = true; HdtEventBridge.Attach(this); InvokeUi(() => { _overlay.Attach(); _bobsBuddy.TryAttach(); });
+			_settings = PluginSettings.Load();
+			_tracker.SetThresholds(_settings.GetThresholds(), _settings.StrictAnomalies);
+			_tracker.Changed += OnHistoryChanged;
+			_bobsBuddy.ResultAvailable += OnSimulationResult;
+			_overlay.PositionChanged += OnOverlayPositionChanged;
+			if(_enabledMenuItem != null) _enabledMenuItem.IsChecked = _settings.Enabled;
+			if(_lockMenuItem != null) _lockMenuItem.IsChecked = _settings.LockOverlayPosition;
+			_trackingEnabled = _settings.Enabled;
+			_loaded = true;
+			HdtEventBridge.Attach(this);
+			InvokeUi(() => { _overlay.Attach(); _bobsBuddy.TryAttach(); });
 		}
 
 		public void OnUnload()
 		{
-			_loaded = false; HdtEventBridge.Detach(this); _tracker.Changed -= OnHistoryChanged; _bobsBuddy.ResultAvailable -= OnSimulationResult; _overlay.PositionChanged -= OnOverlayPositionChanged; _bobsBuddy.Dispose(); _tracker.Unload();
-			InvokeUi(() => { _settingsWindow?.Close(); _settingsWindow = null; _overlay.Detach(); }); _settings.Save();
+			_loaded = false;
+			HdtEventBridge.Detach(this);
+			_tracker.Changed -= OnHistoryChanged;
+			_bobsBuddy.ResultAvailable -= OnSimulationResult;
+			_overlay.PositionChanged -= OnOverlayPositionChanged;
+			_bobsBuddy.Dispose();
+			_tracker.Unload();
+			InvokeUi(() => { _settingsWindow?.Close(); _settingsWindow = null; _overlay.Detach(); });
+			_settings.Save();
 		}
 
 		public void OnButtonPress() => ShowSettings();
@@ -82,7 +100,16 @@ namespace HistoryCombatSimulation
 			if(!_loaded) return;
 			try
 			{
-				if(_attachRetry.ElapsedMilliseconds >= 2000) { _attachRetry.Restart(); InvokeUi(() => _bobsBuddy.TryAttach()); }
+				if(_attachRetry.ElapsedMilliseconds >= 2000)
+				{
+					_attachRetry.Restart();
+					InvokeUi(() =>
+					{
+						if(_overlay.Attach()) RefreshOverlay();
+						_bobsBuddy.TryAttach();
+					});
+				}
+				if(!_trackingEnabled || _waitingForNextGameStart) { PumpOverlay(); return; }
 				PollLateSimulationRecovery();
 				var isSoloBattlegrounds = _game.IsSoloBattlegrounds;
 				if(!_soloMatchReentryGate.ShouldTrack(isSoloBattlegrounds))
@@ -94,28 +121,37 @@ namespace HistoryCombatSimulation
 				if(gameStartDecision == GameStartDecision.StartNewMatch || !_insideSoloMatch) StartSoloMatch();
 
 				var combat = _game.IsCombatPhase; var enteredCombat = _wasCombat == false && combat;
-				if(enteredCombat) { StopLateSimulationRecovery(); _observedCombatStart = true; }
+				if(enteredCombat) { StopLateSimulationRecovery(); _observedCombatStart = true; _skippedCombatTurn = null; }
 				if(combat && _wasCombat != true) ClearUnknownOutcomeRecovery();
 				if(_activeSnapshot != null && _combatTurnAdvanceGate.ShouldRollOver(_activeSnapshot.Turn, _game.Turn, combat, _uptime.ElapsedMilliseconds)) FinalizeInterruptedCombat();
-				if(combat && _activeSnapshot == null) TryBeginCombat(_observedCombatStart && !_damageObservedBeforeSnapshot);
+				if(combat && _activeSnapshot == null && _skippedCombatTurn != _game.Turn) TryBeginCombat(_observedCombatStart && !_damageObservedBeforeSnapshot);
 				if(combat && _activeSnapshot != null && _game.IsReconnect && !_reconnectRecoveryActive) { _reconnectRecoveryActive = true; _missingSimulationPoll.Restart(); InvokeUi(_bobsBuddy.EnableGuardedRecovery); }
 				if(combat && _activeSnapshot != null && _tracker.ActiveRow?.Probabilities == null && _missingSimulationPoll.ElapsedMilliseconds >= (_reconnectRecoveryActive ? 10000 : 2000)) { _missingSimulationPoll.Restart(); InvokeUi(_bobsBuddy.PollRecovery); }
 				if(_wasCombat == true && !combat) FinalizeActiveCombat();
 				if(!combat) TryRecoverUnknownOutcome();
-				_wasCombat = combat; PumpOverlay();
+				_wasCombat = combat; _updateFailureLogged = false; PumpOverlay();
 			}
-			catch(Exception ex) { Log.Error("History Combat Simulation update failed (" + ex.GetType().Name + ")."); InvokeUi(_overlay.Hide); }
+			catch(Exception ex)
+			{
+				if(!_updateFailureLogged)
+				{
+					_updateFailureLogged = true;
+					PluginLog.Error("update failed", ex);
+				}
+				_lastFocusAllowsOverlay = null; _lastCanvasWidth = double.NaN; _lastCanvasHeight = double.NaN;
+				InvokeUi(_overlay.Hide);
+			}
 		}
 
 		private void StartSoloMatch()
 		{
-			_matchEpoch++; _insideSoloMatch = true; _wasCombat = null; _activeSnapshot = null; _activeSnapshotHasReliableStart = false; _observedCombatStart = false; _damageObservedBeforeSnapshot = false; _reconnectRecoveryActive = false; _combatTurnAdvanceGate.Reset(); StopLateSimulationRecovery(); ClearAwaitingDefinitiveResult(); ClearUnknownOutcomeRecovery(); _tracker.StartNewMatch();
+			_matchEpoch++; _insideSoloMatch = true; _wasCombat = null; _activeSnapshot = null; _activeSnapshotHasReliableStart = false; _observedCombatStart = false; _damageObservedBeforeSnapshot = false; _reconnectRecoveryActive = false; _skippedCombatTurn = null; _combatTurnAdvanceGate.Reset(); StopLateSimulationRecovery(); ClearAwaitingDefinitiveResult(); ClearUnknownOutcomeRecovery(); _tracker.StartNewMatch();
 		}
 
 		private void TryBeginCombat(bool reliableStart)
 		{
 			var snapshot = _game.SnapshotCombat(); if(snapshot == null) return;
-			var row = _tracker.BeginCombat(snapshot); if(row == null) return;
+			var row = _tracker.BeginCombat(snapshot); if(row == null) { _skippedCombatTurn = snapshot.Turn; return; }
 			StopLateSimulationRecovery(); ClearUnknownOutcomeRecovery();
 			_activeSnapshot = row.Snapshot; _activeSnapshotHasReliableStart = reliableStart; _friendlyDamageAmount = 0; _opponentDamageAmount = 0; ClearAwaitingDefinitiveResult();
 			_reconnectRecoveryActive = _game.IsReconnect; _missingSimulationPoll.Restart();
@@ -133,15 +169,40 @@ namespace HistoryCombatSimulation
 
 		private void FinalizeActiveCombat(CombatOutcome? definitiveMatchResult = null)
 		{
-			var snapshot = _activeSnapshot; if(snapshot == null) return;
-			var forceUncertain = !_activeSnapshotHasReliableStart; var evidence = _game.GetOutcomeEvidence(snapshot, _friendlyDamageAmount, _opponentDamageAmount, forceUncertain); var outcome = CombatOutcomeResolver.Resolve(evidence, definitiveMatchResult); var damage = CombatOutcomeResolver.ResolveDamage(outcome, evidence);
+			var snapshot = _activeSnapshot;
+			if(snapshot == null) return;
+			var forceUncertain = !_activeSnapshotHasReliableStart;
+			var evidence = _game.GetOutcomeEvidence(snapshot, _friendlyDamageAmount, _opponentDamageAmount, forceUncertain);
+			var outcome = CombatOutcomeResolver.Resolve(evidence, definitiveMatchResult);
+			var damage = CombatOutcomeResolver.ResolveDamage(outcome, evidence);
 			var simulationMissing = _tracker.ActiveRow?.Probabilities == null;
 			if(simulationMissing) StartLateSimulationRecovery(snapshot.Turn); else _bobsBuddy.EndCombat();
 			_tracker.FinalizeCombat(snapshot.Turn, outcome, damage);
-			if(!definitiveMatchResult.HasValue && outcome == CombatOutcome.Unknown) { _awaitingDefinitiveResultTurn = snapshot.Turn; _awaitingDefinitiveResultEpoch = _matchEpoch; _awaitingDefinitiveEvidence = evidence; }
+			if(!definitiveMatchResult.HasValue && outcome == CombatOutcome.Unknown)
+			{
+				_awaitingDefinitiveResultTurn = snapshot.Turn;
+				_awaitingDefinitiveResultEpoch = _matchEpoch;
+				_awaitingDefinitiveEvidence = evidence;
+			}
 			else ClearAwaitingDefinitiveResult();
-			if(_awaitingDefinitiveResultTurn.HasValue) { _pendingUnknownSnapshot = snapshot; _pendingFriendlyDamageAmount = _friendlyDamageAmount; _pendingOpponentDamageAmount = _opponentDamageAmount; _pendingSnapshotStartedMidCombat = forceUncertain; _outcomeRecoveryGate.Reset(); _unknownOutcomePoll.Restart(); } else ClearUnknownOutcomeRecovery();
-			_activeSnapshot = null; _activeSnapshotHasReliableStart = false; _observedCombatStart = false; _damageObservedBeforeSnapshot = false; _friendlyDamageAmount = 0; _opponentDamageAmount = 0; _missingSimulationPoll.Reset(); _reconnectRecoveryActive = false;
+			if(_awaitingDefinitiveResultTurn.HasValue)
+			{
+				_pendingUnknownSnapshot = snapshot;
+				_pendingFriendlyDamageAmount = _friendlyDamageAmount;
+				_pendingOpponentDamageAmount = _opponentDamageAmount;
+				_pendingSnapshotStartedMidCombat = forceUncertain;
+				_outcomeRecoveryGate.Reset();
+				_unknownOutcomePoll.Restart();
+			}
+			else ClearUnknownOutcomeRecovery();
+			_activeSnapshot = null;
+			_activeSnapshotHasReliableStart = false;
+			_observedCombatStart = false;
+			_damageObservedBeforeSnapshot = false;
+			_friendlyDamageAmount = 0;
+			_opponentDamageAmount = 0;
+			_missingSimulationPoll.Reset();
+			_reconnectRecoveryActive = false;
 		}
 
 		private void TryRecoverUnknownOutcome()
@@ -182,12 +243,14 @@ namespace HistoryCombatSimulation
 
 		internal void HandleGameStart()
 		{
+			if(_settings.Enabled && _waitingForNextGameStart) { _waitingForNextGameStart = false; _trackingEnabled = true; }
+			if(!_trackingEnabled) return;
 			_gameStartGate.Notify(_uptime.ElapsedMilliseconds); _soloMatchReentryGate.GameStarted();
 		}
 
 		internal void HandleGameEnd()
 		{
-			if(!_insideSoloMatch || _gameStartGate.IsPending) return;
+			if(!_trackingEnabled || _waitingForNextGameStart || !_insideSoloMatch || _gameStartGate.IsPending) return;
 			ExitSoloMatch(); _soloMatchReentryGate.MatchEnded();
 		}
 
@@ -200,7 +263,7 @@ namespace HistoryCombatSimulation
 
 		internal void HandleDefinitiveMatchResult(CombatOutcome outcome)
 		{
-			if(!_insideSoloMatch || _gameStartGate.IsPending) return;
+			if(!_trackingEnabled || _waitingForNextGameStart || !_insideSoloMatch || _gameStartGate.IsPending) return;
 			if(_activeSnapshot != null) FinalizeActiveCombat(outcome);
 			else if(_awaitingDefinitiveResultTurn.HasValue && _awaitingDefinitiveResultEpoch == _matchEpoch && _awaitingDefinitiveEvidence != null)
 			{
@@ -213,13 +276,14 @@ namespace HistoryCombatSimulation
 
 		internal void HandleDamage(PredamageInfo info)
 		{
-			if(_gameStartGate.IsPending || info?.Entity == null || info.Value <= 0) return;
+			if(!_trackingEnabled || _waitingForNextGameStart || _gameStartGate.IsPending || info?.Entity == null || info.Value <= 0) return;
 			if(_activeSnapshot == null) { if(_insideSoloMatch && _game.IsCombatPhase) _damageObservedBeforeSnapshot = true; return; }
 			var target = _game.IdentifyDamageTarget(info.Entity, _activeSnapshot); if(target == DamageTarget.Friendly) _friendlyDamageAmount = Math.Max(_friendlyDamageAmount, info.Value); else if(target == DamageTarget.Opponent) _opponentDamageAmount = Math.Max(_opponentDamageAmount, info.Value);
 		}
 
 		private void OnSimulationResult(object? sender, SimulationResultEventArgs e)
 		{
+			if(!_trackingEnabled || _waitingForNextGameStart) return;
 			_tracker.UpdateSimulation(e.Turn, e.Probabilities);
 			if(_lateSimulationTurn == e.Turn) StopLateSimulationRecovery();
 		}
@@ -234,7 +298,10 @@ namespace HistoryCombatSimulation
 
 		private void PumpOverlay()
 		{
-			var focusAllowsOverlay = !_settings.HideWhenHearthstoneNotForeground || User32.IsHearthstoneInForeground(); var canvas = Hearthstone_Deck_Tracker.API.Core.OverlayCanvas; var width = canvas.ActualWidth; var height = canvas.ActualHeight;
+			var focusAllowsOverlay = !_settings.HideWhenHearthstoneNotForeground || User32.IsHearthstoneInForeground();
+			var canvas = Hearthstone_Deck_Tracker.API.Core.OverlayCanvas;
+			if(canvas == null) { _lastCanvasWidth = double.NaN; _lastCanvasHeight = double.NaN; return; }
+			var width = canvas.ActualWidth; var height = canvas.ActualHeight;
 			if(_lastFocusAllowsOverlay == focusAllowsOverlay && Math.Abs(_lastCanvasWidth - width) < .1 && Math.Abs(_lastCanvasHeight - height) < .1) return;
 			_lastFocusAllowsOverlay = focusAllowsOverlay; _lastCanvasWidth = width; _lastCanvasHeight = height; RefreshOverlay();
 		}
@@ -242,14 +309,47 @@ namespace HistoryCombatSimulation
 		private MenuItem BuildMenu()
 		{
 			var root = new MenuItem { Header = "History Combat Simulation" };
-			_enabledMenuItem = new MenuItem { Header = "Enabled", IsCheckable = true, IsChecked = _settings.Enabled }; _enabledMenuItem.Click += (_, __) => { _settings.Enabled = _enabledMenuItem.IsChecked; _settings.Save(); RefreshOverlay(); };
+			_enabledMenuItem = new MenuItem { Header = "Enabled", IsCheckable = true, IsChecked = _settings.Enabled }; _enabledMenuItem.Click += (_, __) => { _settings.Enabled = _enabledMenuItem.IsChecked; ApplyEnabledState(); _settings.Save(); RefreshOverlay(); };
 			var settings = new MenuItem { Header = "Settings" }; settings.Click += (_, __) => ShowSettings();
 			_lockMenuItem = new MenuItem { Header = "Lock overlay position", IsCheckable = true, IsChecked = _settings.LockOverlayPosition }; _lockMenuItem.Click += (_, __) => { _settings.LockOverlayPosition = _lockMenuItem.IsChecked; _settings.Save(); RefreshOverlay(); };
 			root.Items.Add(_enabledMenuItem); root.Items.Add(_lockMenuItem); root.Items.Add(settings); return root;
 		}
 
-		private void ShowSettings() => InvokeUi(() => { if(_settingsWindow != null) { _settingsWindow.Activate(); return; } _settingsWindow = new SettingsWindow(_settings, ApplySettings); _settingsWindow.Closed += (_, __) => _settingsWindow = null; _settingsWindow.Show(); });
-		private void ApplySettings() { _settings.Normalize(); _settings.Save(); if(_enabledMenuItem != null) _enabledMenuItem.IsChecked = _settings.Enabled; if(_lockMenuItem != null) _lockMenuItem.IsChecked = _settings.LockOverlayPosition; _tracker.SetThresholds(_settings.GetThresholds(), _settings.StrictAnomalies); RefreshOverlay(); }
-		private static void InvokeUi(Action action) { var dispatcher = Application.Current?.Dispatcher; if(dispatcher == null || dispatcher.CheckAccess()) action(); else dispatcher.BeginInvoke(action); }
+		private void ShowSettings() => InvokeUi(() => { if(_settingsWindow != null) { _settingsWindow.Activate(); return; } _settingsWindow = new SettingsWindow(_settings, ApplySettings, Version); _settingsWindow.Closed += (_, __) => _settingsWindow = null; _settingsWindow.Show(); });
+		private void ApplySettings()
+		{
+			_settings.Normalize();
+			ApplyEnabledState();
+			_settings.Save();
+			if(_enabledMenuItem != null) _enabledMenuItem.IsChecked = _settings.Enabled;
+			if(_lockMenuItem != null) _lockMenuItem.IsChecked = _settings.LockOverlayPosition;
+			_tracker.SetThresholds(_settings.GetThresholds(), _settings.StrictAnomalies);
+			RefreshOverlay();
+		}
+
+		private void ApplyEnabledState()
+		{
+			if(_settings.Enabled == _trackingEnabled && !_waitingForNextGameStart) return;
+			if(!_settings.Enabled)
+			{
+				_trackingEnabled = false; _waitingForNextGameStart = false;
+				if(_activeSnapshot != null) FinalizeInterruptedCombat();
+				StopLateSimulationRecovery(); ClearUnknownOutcomeRecovery(); ClearAwaitingDefinitiveResult();
+				_wasCombat = null; _insideSoloMatch = false; _skippedCombatTurn = null;
+				return;
+			}
+			_trackingEnabled = false; _waitingForNextGameStart = true;
+		}
+		private static void InvokeUi(Action action)
+		{
+			Action safeAction = () =>
+			{
+				try { action(); }
+				catch(Exception ex) { PluginLog.Error("UI action failed", ex); }
+			};
+			var dispatcher = Application.Current?.Dispatcher;
+			if(dispatcher == null || dispatcher.CheckAccess()) safeAction();
+			else dispatcher.BeginInvoke(safeAction);
+		}
 	}
 }

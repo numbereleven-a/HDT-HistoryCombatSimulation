@@ -2,7 +2,6 @@ using System;
 using System.IO;
 using System.Xml.Serialization;
 using Hearthstone_Deck_Tracker;
-using Hearthstone_Deck_Tracker.Utility.Logging;
 
 namespace HistoryCombatSimulation
 {
@@ -40,7 +39,7 @@ namespace HistoryCombatSimulation
 			Opacity = NormalizeValue(Opacity, .2, 1, 1);
 			BackgroundOpacity = NormalizeValue(BackgroundOpacity, 0, 1, 1);
 			VisibleRows = Math.Max(6, Math.Min(20, VisibleRows));
-			UnusualExpectedPercent = NormalizeValue(UnusualExpectedPercent, 50, 99, 51);
+			UnusualExpectedPercent = NormalizeValue(UnusualExpectedPercent, 51, 99, 51);
 			VeryUnusualExpectedPercent = NormalizeValue(VeryUnusualExpectedPercent, UnusualExpectedPercent, 99, Math.Max(80, UnusualExpectedPercent));
 			ExtremeExpectedPercent = NormalizeValue(ExtremeExpectedPercent, VeryUnusualExpectedPercent, 100, Math.Max(95, VeryUnusualExpectedPercent));
 		}
@@ -64,7 +63,10 @@ namespace HistoryCombatSimulation
 						var loaded = Serializer.Deserialize(stream) as PluginSettings ?? new PluginSettings(); loaded.Normalize(); return loaded;
 					}
 			}
-			catch { }
+			catch(Exception ex)
+			{
+				PluginLog.Warn("settings load failed; defaults will be used", ex);
+			}
 			return new PluginSettings();
 		}
 
@@ -73,12 +75,23 @@ namespace HistoryCombatSimulation
 			string? temporaryPath = null;
 			try
 			{
-				Normalize(); var path = GetPath(); Directory.CreateDirectory(Path.GetDirectoryName(path));
+				Normalize();
+				var path = GetPath();
+				var directory = Path.GetDirectoryName(path);
+				if(string.IsNullOrEmpty(directory))
+					return;
+				Directory.CreateDirectory(directory);
 				temporaryPath = path + ".tmp";
 				using(var stream = new FileStream(temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None)) { Serializer.Serialize(stream, this); stream.Flush(true); }
 				if(File.Exists(path)) File.Replace(temporaryPath, path, null); else File.Move(temporaryPath, path);
 			}
-			catch(Exception ex) { Log.Error("History Combat Simulation: settings save failed (" + ex.GetType().Name + ")."); }
+			catch(Exception ex)
+			{
+				PluginLog.Error("settings save failed", ex);
+				if(temporaryPath != null)
+					try { File.Delete(temporaryPath); }
+					catch { }
+			}
 		}
 
 		private static string GetPath() => Path.Combine(Config.Instance.ConfigDir, "HistoryCombatSimulation", "settings.xml");

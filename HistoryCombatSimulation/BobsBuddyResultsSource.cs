@@ -3,8 +3,8 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Windows;
 using Hearthstone_Deck_Tracker;
+using Hearthstone_Deck_Tracker.BobsBuddy;
 using Hearthstone_Deck_Tracker.Controls.Overlay;
-using Hearthstone_Deck_Tracker.Utility.Logging;
 
 namespace HistoryCombatSimulation
 {
@@ -13,6 +13,9 @@ namespace HistoryCombatSimulation
 		private BobsBuddyPanel? _panel;
 		private int? _activeTurn;
 		private bool _postCombatRecovery;
+		private int _attachMisses;
+		private bool _attachFailureLogged;
+		private bool _readFailureLogged;
 		private readonly BobsBuddyCaptureGate _gate = new BobsBuddyCaptureGate();
 		public event EventHandler<SimulationResultEventArgs>? ResultAvailable;
 
@@ -22,10 +25,24 @@ namespace HistoryCombatSimulation
 			try
 			{
 				var panel = Core.Overlay?.FindName("BobsBuddyDisplay") as BobsBuddyPanel;
-				if(panel == null) return false;
+				if(panel == null)
+				{
+					_attachMisses++;
+					if(_attachMisses == 5)
+						PluginLog.Warn("Bob's Buddy panel is not ready; attachment will continue in the background.");
+					return false;
+				}
 				_panel = panel; panel.PropertyChanged += OnPropertyChanged; return true;
 			}
-			catch { return false; }
+			catch(Exception ex)
+			{
+				if(!_attachFailureLogged)
+				{
+					_attachFailureLogged = true;
+					PluginLog.Warn("Bob's Buddy panel attachment failed", ex);
+				}
+				return false;
+			}
 		}
 
 		public void BeginCombat(int turn, bool guardedRecovery = false)
@@ -48,7 +65,12 @@ namespace HistoryCombatSimulation
 		private void TryPublishSafely(bool guardedCheck, bool allowPostCombatState = false)
 		{
 			try { TryPublish(guardedCheck, allowPostCombatState); }
-			catch(Exception ex) { Log.Error("History Combat Simulation: Bob's Buddy result read failed (" + ex.GetType().Name + ")."); }
+			catch(Exception ex)
+			{
+				if(_readFailureLogged) return;
+				_readFailureLogged = true;
+				PluginLog.Error("Bob's Buddy result read failed", ex);
+			}
 		}
 
 		private void TryPublish(bool guardedCheck, bool allowPostCombatState = false)
@@ -56,12 +78,24 @@ namespace HistoryCombatSimulation
 			var panel = _panel;
 			if(panel == null || !_activeTurn.HasValue)
 				return;
-			var state = panel.State.ToString();
+			var state = MapState(panel.State);
 			var game = Core.Game;
 			if(_postCombatRecovery && game?.IsBattlegroundsCombatPhase == true && CombatTurnBoundary.HasAdvanced(_activeTurn.Value, game.GetTurnNumber())) { EndCombat(); return; }
-			if(!_gate.TryCapture(state, panel.ErrorState.ToString(), panel.PercentagesVisibility == Visibility.Visible, panel.WinRateDisplay, panel.TieRateDisplay, panel.LossRateDisplay, CultureInfo.CurrentCulture, out var probabilities, guardedCheck, allowPostCombatState) || probabilities == null)
+			if(!_gate.TryCapture(state, panel.ErrorState == BobsBuddyErrorState.None, panel.PercentagesVisibility == Visibility.Visible, panel.WinRateDisplay, panel.TieRateDisplay, panel.LossRateDisplay, CultureInfo.CurrentCulture, out var probabilities, guardedCheck, allowPostCombatState) || probabilities == null)
 				return;
+			_readFailureLogged = false;
 			ResultAvailable?.Invoke(this, new SimulationResultEventArgs(_activeTurn.Value, probabilities!));
+		}
+
+		private static BobsBuddyCaptureState MapState(BobsBuddyState state)
+		{
+			switch(state)
+			{
+				case BobsBuddyState.Combat: return BobsBuddyCaptureState.Combat;
+				case BobsBuddyState.Shopping: return BobsBuddyCaptureState.Shopping;
+				case BobsBuddyState.GameOver: return BobsBuddyCaptureState.GameOver;
+				default: return BobsBuddyCaptureState.Unsupported;
+			}
 		}
 		public void Dispose()
 		{
