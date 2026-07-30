@@ -70,6 +70,7 @@ Available settings include:
 * Anomaly markers
 * Combat damage column
 * Hero portrait column
+* Overlay preview
 * Hide when Hearthstone is not in focus
 * Overlay position lock
 * Reset visual settings

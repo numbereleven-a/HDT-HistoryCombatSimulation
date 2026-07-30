@@ -115,7 +115,7 @@ namespace HistoryCombatSimulation
 				|| Math.Abs(_appliedVerticalOffset - settings.VerticalOffset) >= .01;
 			var canvasWidth = _canvas?.ActualWidth ?? double.NaN;
 			var canvasWidthUnchanged = IsFinite(canvasWidth) && Math.Abs(_appliedCanvasWidth - canvasWidth) < .1;
-			var preview = rows.Count == 0 && !settings.LockOverlayPosition;
+			var preview = rows.Count == 0 && (settings.ShowOverlayPreview || !settings.LockOverlayPosition);
 			if(rows.Count == 0 && !preview)
 			{
 				_lastRowCount = 0;
@@ -160,27 +160,24 @@ namespace HistoryCombatSimulation
 			if(HistoryViewportPolicy.ShouldScrollToNewest(_lastRowCount, displayRows.Count, _visibleRows, settings.VisibleRows, wasAtNewest)) _scroll.Value = _scroll.Maximum;
 			_scroll.Visibility = displayRows.Count > settings.VisibleRows ? Visibility.Visible : Visibility.Collapsed; _changingScroll = false;
 			_lastRowCount = displayRows.Count; _visibleRows = settings.VisibleRows; RenderViewport(displayRows, settings);
-			var newScaledWidth = _layer.Width * settings.Scale;
 			if(!positionInputChanged && canvasWidthUnchanged && IsFinite(previousLeft))
-				PreserveTopLeft(settings, previousLeft, previousTop, newScaledWidth);
+				PreserveTopLeft(settings, previousLeft, previousTop);
 			else
 				Position(settings);
 			RememberAppliedPosition(settings);
 			ApplyInteraction(settings); _background.Color = Color.FromArgb((byte)Math.Round(settings.BackgroundOpacity * 255), 18, 20, 23); _layer.Opacity = settings.Opacity; _layer.RenderTransform = new ScaleTransform(settings.Scale, settings.Scale); _layer.Visibility = Visibility.Visible;
 		}
 
-		private void PreserveTopLeft(PluginSettings settings, double left, double top, double scaledWidth)
+		private void PreserveTopLeft(PluginSettings settings, double left, double top)
 		{
 			var canvas = _canvas;
 			if(canvas == null || canvas.ActualWidth <= 0)
 				return;
 			Canvas.SetLeft(_layer, left);
 			Canvas.SetTop(_layer, IsFinite(top) ? top : settings.VerticalOffset);
-			var oldOffset = settings.HorizontalOffset;
-			settings.HorizontalOffset = OverlayPositionPolicy.HorizontalOffsetFromLeft(settings.Side, canvas.ActualWidth, scaledWidth, left);
-			settings.Normalize();
-			if(Math.Abs(oldOffset - settings.HorizontalOffset) >= .01)
-				PositionChanged?.Invoke(this, EventArgs.Empty);
+			// This is a transient geometry correction. Persisting a derived right-side
+			// offset here makes small startup-size differences accumulate across sessions.
+			// Only an explicit drag or settings change is allowed to modify the saved offset.
 		}
 
 		private void RememberAppliedPosition(PluginSettings settings)

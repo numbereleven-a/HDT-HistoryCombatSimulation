@@ -33,11 +33,13 @@ namespace HistoryCombatSimulation
 		private readonly CheckBox _showAnomalies = Check("Show anomaly markers (! / !! / !!!)");
 		private readonly CheckBox _showDamage = Check("Show combat damage column");
 		private readonly CheckBox _showHero = Check("Show hero column");
+		private readonly CheckBox _showPreview = Check("Show overlay preview");
 		private readonly CheckBox _strictAnomalies = Check("Strict anomaly mode");
 
 		public SettingsWindow(PluginSettings settings, Action applied, Version installedVersion)
 		{
 			_settings = settings; _applied = applied; _installedVersion = installedVersion; Title = "History Combat Simulation settings"; Width = 500; Height = 720; ResizeMode = ResizeMode.NoResize;
+			_showPreview.ToolTip = "Show example combat rows when no combat history is available.";
 			var owner = Application.Current?.MainWindow;
 			if(owner != null && !ReferenceEquals(owner, this)) { Owner = owner; WindowStartupLocation = WindowStartupLocation.CenterOwner; }
 			else WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -55,7 +57,7 @@ namespace HistoryCombatSimulation
 			AddSlider(panel, "!! expected result, %", "very", 50, 99, 1, "0");
 			AddSlider(panel, "!!! expected result, %", "extreme", 50, 100, 1, "0");
 			panel.Children.Add(_summary); panel.Children.Add(_showAnomalies); panel.Children.Add(_showDamage); panel.Children.Add(_showHero);
-			panel.Children.Add(_hideWhenUnfocused); panel.Children.Add(_lockPosition);
+			panel.Children.Add(_hideWhenUnfocused); panel.Children.Add(_showPreview); panel.Children.Add(_lockPosition);
 
 			var resetRow = new DockPanel { Margin = new Thickness(4, 10, 4, 2) };
 			var reset = new Button { Content = "Reset visual settings", Width = 145, HorizontalAlignment = HorizontalAlignment.Left }; reset.Click += (_, __) => LoadVisualValues(new PluginSettings()); resetRow.Children.Add(reset); panel.Children.Add(resetRow);
@@ -126,7 +128,7 @@ namespace HistoryCombatSimulation
 
 		private void LoadValues(PluginSettings source)
 		{
-			_enabled.IsChecked = source.Enabled; _layout.SelectedItem = source.Layout; _side.SelectedItem = source.Side; _summary.IsChecked = source.ShowMatchSummary; _showAnomalies.IsChecked = source.ShowAnomalyStatus; _showDamage.IsChecked = source.ShowDamageColumn; _showHero.IsChecked = source.ShowHeroColumn; _strictAnomalies.IsChecked = source.StrictAnomalies; _lockPosition.IsChecked = source.LockOverlayPosition; _hideWhenUnfocused.IsChecked = source.HideWhenHearthstoneNotForeground;
+			_enabled.IsChecked = source.Enabled; _layout.SelectedItem = source.Layout; _side.SelectedItem = source.Side; _summary.IsChecked = source.ShowMatchSummary; _showAnomalies.IsChecked = source.ShowAnomalyStatus; _showDamage.IsChecked = source.ShowDamageColumn; _showHero.IsChecked = source.ShowHeroColumn; _showPreview.IsChecked = source.ShowOverlayPreview; _strictAnomalies.IsChecked = source.StrictAnomalies; _lockPosition.IsChecked = source.LockOverlayPosition; _hideWhenUnfocused.IsChecked = source.HideWhenHearthstoneNotForeground;
 			Set("x", source.HorizontalOffset); Set("y", source.VerticalOffset); Set("scale", source.Scale); Set("opacity", source.Opacity); Set("backgroundOpacity", source.BackgroundOpacity); Set("rows", source.VisibleRows);
 			Set("unusual", source.UnusualExpectedPercent); Set("very", source.VeryUnusualExpectedPercent); Set("extreme", source.ExtremeExpectedPercent);
 			UpdateAnomalySliderState();
@@ -142,7 +144,7 @@ namespace HistoryCombatSimulation
 		{
 			_settings.Enabled = _enabled.IsChecked == true; if(_layout.SelectedItem is HistoryLayout layout) _settings.Layout = layout; if(_side.SelectedItem is OverlaySide side) _settings.Side = side;
 			_settings.HorizontalOffset = Get("x"); _settings.VerticalOffset = Get("y"); _settings.Scale = Get("scale"); _settings.Opacity = Get("opacity"); _settings.BackgroundOpacity = Get("backgroundOpacity"); _settings.VisibleRows = (int)Math.Round(Get("rows"));
-			_settings.UnusualExpectedPercent = Get("unusual"); _settings.VeryUnusualExpectedPercent = Get("very"); _settings.ExtremeExpectedPercent = Get("extreme"); _settings.ShowMatchSummary = _summary.IsChecked == true; _settings.ShowAnomalyStatus = _showAnomalies.IsChecked == true; _settings.ShowDamageColumn = _showDamage.IsChecked == true; _settings.ShowHeroColumn = _showHero.IsChecked == true; _settings.StrictAnomalies = _strictAnomalies.IsChecked == true; _settings.LockOverlayPosition = _lockPosition.IsChecked == true; _settings.HideWhenHearthstoneNotForeground = _hideWhenUnfocused.IsChecked == true;
+			_settings.UnusualExpectedPercent = Get("unusual"); _settings.VeryUnusualExpectedPercent = Get("very"); _settings.ExtremeExpectedPercent = Get("extreme"); _settings.ShowMatchSummary = _summary.IsChecked == true; _settings.ShowAnomalyStatus = _showAnomalies.IsChecked == true; _settings.ShowDamageColumn = _showDamage.IsChecked == true; _settings.ShowHeroColumn = _showHero.IsChecked == true; _settings.ShowOverlayPreview = _showPreview.IsChecked == true; _settings.StrictAnomalies = _strictAnomalies.IsChecked == true; _settings.LockOverlayPosition = _lockPosition.IsChecked == true; _settings.HideWhenHearthstoneNotForeground = _hideWhenUnfocused.IsChecked == true;
 			_settings.Normalize(); _settings.Save(); LoadValues(_settings); _applied();
 		}
 

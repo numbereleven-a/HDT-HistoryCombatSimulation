@@ -29,6 +29,7 @@ namespace HistoryCombatSimulation
 		public bool ShowAnomalyStatus { get; set; } = true;
 		public bool ShowDamageColumn { get; set; }
 		public bool ShowHeroColumn { get; set; } = true;
+		public bool ShowOverlayPreview { get; set; }
 		public bool StrictAnomalies { get; set; } = true;
 
 		public void Normalize()
@@ -49,7 +50,7 @@ namespace HistoryCombatSimulation
 		{
 			Enabled = other.Enabled; Layout = other.Layout; Side = other.Side; HorizontalOffset = other.HorizontalOffset; VerticalOffset = other.VerticalOffset;
 			Scale = other.Scale; Opacity = other.Opacity; BackgroundOpacity = other.BackgroundOpacity; VisibleRows = other.VisibleRows; UnusualExpectedPercent = other.UnusualExpectedPercent;
-			VeryUnusualExpectedPercent = other.VeryUnusualExpectedPercent; ExtremeExpectedPercent = other.ExtremeExpectedPercent; ShowMatchSummary = other.ShowMatchSummary; LockOverlayPosition = other.LockOverlayPosition; HideWhenHearthstoneNotForeground = other.HideWhenHearthstoneNotForeground; ShowAnomalyStatus = other.ShowAnomalyStatus; ShowDamageColumn = other.ShowDamageColumn; ShowHeroColumn = other.ShowHeroColumn; StrictAnomalies = other.StrictAnomalies;
+			VeryUnusualExpectedPercent = other.VeryUnusualExpectedPercent; ExtremeExpectedPercent = other.ExtremeExpectedPercent; ShowMatchSummary = other.ShowMatchSummary; LockOverlayPosition = other.LockOverlayPosition; HideWhenHearthstoneNotForeground = other.HideWhenHearthstoneNotForeground; ShowAnomalyStatus = other.ShowAnomalyStatus; ShowDamageColumn = other.ShowDamageColumn; ShowHeroColumn = other.ShowHeroColumn; ShowOverlayPreview = other.ShowOverlayPreview; StrictAnomalies = other.StrictAnomalies;
 		}
 
 		public static PluginSettings Load()

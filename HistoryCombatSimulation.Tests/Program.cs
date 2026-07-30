@@ -284,21 +284,21 @@ internal static class Program
 
 	private static void VersionAndMovementDefaultsAreStable()
 	{
-		Equal("1.2", PluginVersion.Display, "short displayed version"); Equal("1.2", PluginVersion.LocalRelease, "stable release label"); Equal("1.2", PluginVersion.Hdt.ToString(), "HDT version has no trailing zeroes");
-		Equal("1.2", typeof(PluginVersion).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion, "assembly informational version has no source revision suffix");
+		Equal("1.3", PluginVersion.Display, "short displayed version"); Equal("1.3", PluginVersion.LocalRelease, "stable release label"); Equal("1.3", PluginVersion.Hdt.ToString(), "HDT version has no trailing zeroes");
+		Equal("1.3", typeof(PluginVersion).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion, "assembly informational version has no source revision suffix");
 		var settings = new PluginSettings(); True(settings.LockOverlayPosition, "overlay movement is locked by default"); True(settings.ShowAnomalyStatus, "anomaly status is shown by default");
 		False(settings.ShowDamageColumn, "combat damage column is hidden by default"); True(settings.ShowHeroColumn, "hero column is shown by default");
 		True(settings.StrictAnomalies, "strict anomaly mode is enabled by default");
 		Near(14, settings.HorizontalOffset, "default horizontal offset matches the release layout"); Near(155, settings.VerticalOffset, "default vertical offset matches the release layout");
 		Near(1, settings.Opacity, "overlay is fully opaque by default"); Near(1, settings.BackgroundOpacity, "background is fully opaque by default");
-		False(settings.ShowMatchSummary, "expected-versus-actual summary is hidden by default");
+		False(settings.ShowMatchSummary, "expected-versus-actual summary is hidden by default"); False(settings.ShowOverlayPreview, "overlay preview is hidden by default");
 		using(var reader = new StringReader("<PluginSettings><ShowCombatDamageColumn>true</ShowCombatDamageColumn></PluginSettings>"))
 		{
 			var migrated = (PluginSettings)new XmlSerializer(typeof(PluginSettings)).Deserialize(reader); False(migrated.ShowDamageColumn, "the old default-on damage setting does not carry into the new default-off option");
 		}
 		Near(51, settings.UnusualExpectedPercent, "light anomaly expected-result threshold"); Near(80, settings.VeryUnusualExpectedPercent, "strong anomaly expected-result threshold"); Near(95, settings.ExtremeExpectedPercent, "extreme anomaly expected-result threshold");
 		False(settings.HideWhenHearthstoneNotForeground, "focus hiding is disabled by default");
-		var copy = new PluginSettings { LockOverlayPosition = false, HideWhenHearthstoneNotForeground = false, BackgroundOpacity = .35 }; settings.CopyFrom(copy); False(settings.LockOverlayPosition, "movement lock is copied with visual settings"); False(settings.HideWhenHearthstoneNotForeground, "focus behavior is copied with visual settings"); Near(.35, settings.BackgroundOpacity, "background opacity is copied");
+		var copy = new PluginSettings { LockOverlayPosition = false, HideWhenHearthstoneNotForeground = false, ShowOverlayPreview = true, BackgroundOpacity = .35 }; settings.CopyFrom(copy); False(settings.LockOverlayPosition, "movement lock is copied with visual settings"); False(settings.HideWhenHearthstoneNotForeground, "focus behavior is copied with visual settings"); True(settings.ShowOverlayPreview, "preview behavior is copied with settings"); Near(.35, settings.BackgroundOpacity, "background opacity is copied");
 		var bounds = new PluginSettings { HorizontalOffset = 900, UnusualExpectedPercent = 50, VeryUnusualExpectedPercent = 100 }; bounds.Normalize(); Near(500, bounds.HorizontalOffset, "finite visual values saturate at the nearest boundary"); Near(51, bounds.UnusualExpectedPercent, "the light anomaly threshold cannot be set to an ineffective 50 percent"); Near(99, bounds.VeryUnusualExpectedPercent, "the strong anomaly threshold maximum does not jump back to its default");
 		var invalid = new PluginSettings { Scale = double.NaN, BackgroundOpacity = double.PositiveInfinity }; invalid.Normalize(); Near(1, invalid.Scale, "non-finite settings use a safe fallback"); Near(1, invalid.BackgroundOpacity, "non-finite background opacity uses a safe fallback");
 		Throws<ArgumentOutOfRangeException>(() => new SimulationProbabilities(double.NaN, 0, 1), "probability model rejects NaN");
