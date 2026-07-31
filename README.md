@@ -62,6 +62,7 @@ Available settings include:
 * Horizontal and vertical offsets
 * Overlay size
 * Overlay opacity
+* Full, header-only, or transparent background
 * Background opacity
 * Number of visible rows
 * Strict anomaly mode

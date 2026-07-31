@@ -18,8 +18,10 @@ namespace HistoryCombatSimulation
 	{
 		private readonly Canvas _layer = new Canvas { Visibility = Visibility.Collapsed };
 		private readonly SolidColorBrush _background = new SolidColorBrush(Color.FromArgb(224, 18, 20, 23));
+		private readonly SolidColorBrush _headerBackground = new SolidColorBrush(Colors.Transparent);
 		private readonly Border _visual;
 		private readonly StackPanel _content = new StackPanel();
+		private readonly Border _header = new Border { CornerRadius = new CornerRadius(3) };
 		private readonly TextBlock _title = Text("COMBAT HISTORY", 13, FontWeights.Bold);
 		private readonly Button _collapse = new Button { Content = "−", Width = 21, Height = 18, Padding = new Thickness(0), Margin = new Thickness(5, 0, 0, 0), Cursor = Cursors.Hand, ToolTip = "Collapse" };
 		private readonly TextBlock _summary = Text(string.Empty, 11, FontWeights.Normal);
@@ -55,7 +57,7 @@ namespace HistoryCombatSimulation
 		{
 			_visual = new Border { Background = _background, CornerRadius = new CornerRadius(5), Padding = new Thickness(7), IsHitTestVisible = true };
 			_title.ToolTip = "Anomaly markers appear when the most likely result did not happen: ! above 50%, !! at least 80%, !!! at least 95% expected probability by default.";
-			var header = new DockPanel(); DockPanel.SetDock(_collapse, Dock.Right); header.Children.Add(_collapse); header.Children.Add(_title); _content.Children.Add(header); _content.Children.Add(_summary); _content.Children.Add(_columns); _content.Children.Add(_older); _content.Children.Add(_rows);
+			var headerContent = new DockPanel(); DockPanel.SetDock(_collapse, Dock.Right); headerContent.Children.Add(_collapse); headerContent.Children.Add(_title); _header.Background = _headerBackground; _header.Child = headerContent; _content.Children.Add(_header); _content.Children.Add(_summary); _content.Children.Add(_columns); _content.Children.Add(_older); _content.Children.Add(_rows);
 			_visual.Child = _content; _layer.Children.Add(_visual); _layer.Children.Add(_scroll);
 			_scroll.ValueChanged += (_, __) => { if(!_changingScroll && _lastSettings != null) RenderViewport(_lastRows, _lastSettings); };
 			_visual.MouseLeftButtonDown += BeginDrag; _visual.MouseMove += Drag; _visual.MouseLeftButtonUp += EndDrag;
@@ -165,7 +167,14 @@ namespace HistoryCombatSimulation
 			else
 				Position(settings);
 			RememberAppliedPosition(settings);
-			ApplyInteraction(settings); _background.Color = Color.FromArgb((byte)Math.Round(settings.BackgroundOpacity * 255), 18, 20, 23); _layer.Opacity = settings.Opacity; _layer.RenderTransform = new ScaleTransform(settings.Scale, settings.Scale); _layer.Visibility = Visibility.Visible;
+			ApplyInteraction(settings); ApplyBackground(settings); _layer.Opacity = settings.Opacity; _layer.RenderTransform = new ScaleTransform(settings.Scale, settings.Scale); _layer.Visibility = Visibility.Visible;
+		}
+
+		private void ApplyBackground(PluginSettings settings)
+		{
+			var opacity = (byte)Math.Round(settings.BackgroundOpacity * 255);
+			_background.Color = Color.FromArgb(settings.BackgroundMode == OverlayBackgroundMode.Full ? opacity : (byte)0, 18, 20, 23);
+			_headerBackground.Color = Color.FromArgb(settings.BackgroundMode == OverlayBackgroundMode.Header ? opacity : (byte)0, 18, 20, 23);
 		}
 
 		private void PreserveTopLeft(PluginSettings settings, double left, double top)

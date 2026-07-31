@@ -17,6 +17,7 @@ namespace HistoryCombatSimulation
 		private readonly Action _applied;
 		private readonly ComboBox _layout = new ComboBox { ItemsSource = Enum.GetValues(typeof(HistoryLayout)), Margin = new Thickness(4) };
 		private readonly ComboBox _side = new ComboBox { ItemsSource = Enum.GetValues(typeof(OverlaySide)), Margin = new Thickness(4) };
+		private readonly ComboBox _backgroundMode = new ComboBox { ItemsSource = Enum.GetValues(typeof(OverlayBackgroundMode)), Margin = new Thickness(4) };
 		private readonly Dictionary<string, Slider> _sliders = new Dictionary<string, Slider>();
 		private readonly Dictionary<string, TextBlock> _values = new Dictionary<string, TextBlock>();
 		private readonly Dictionary<string, string> _formats = new Dictionary<string, string>();
@@ -43,24 +44,30 @@ namespace HistoryCombatSimulation
 			var owner = Application.Current?.MainWindow;
 			if(owner != null && !ReferenceEquals(owner, this)) { Owner = owner; WindowStartupLocation = WindowStartupLocation.CenterOwner; }
 			else WindowStartupLocation = WindowStartupLocation.CenterScreen;
-			var panel = new StackPanel { Margin = new Thickness(14) };
-			panel.Children.Add(_enabled); panel.Children.Add(Label("Layout", _layout)); panel.Children.Add(Label("Placement", _side));
-			AddSlider(panel, "Horizontal offset", "x", -500, 500, 1, "0");
-			AddSlider(panel, "Vertical offset", "y", -500, 1200, 1, "0");
-			AddSlider(panel, "Scale", "scale", .5, 2, .05, "0.00");
-			AddSlider(panel, "Overlay opacity", "opacity", .2, 1, .05, "0.00");
-			AddSlider(panel, "Background opacity", "backgroundOpacity", 0, 1, .05, "0.00");
-			AddSlider(panel, "Visible rows", "rows", 6, 20, 1, "0");
-			panel.Children.Add(new TextBlock { Text = "Compact order: Win / Tie / Loss", Margin = new Thickness(4, 10, 4, 4), FontWeight = FontWeights.SemiBold });
-			panel.Children.Add(_strictAnomalies);
-			AddSlider(panel, "! expected result, %", "unusual", 51, 99, 1, "0");
-			AddSlider(panel, "!! expected result, %", "very", 50, 99, 1, "0");
-			AddSlider(panel, "!!! expected result, %", "extreme", 50, 100, 1, "0");
-			panel.Children.Add(_summary); panel.Children.Add(_showAnomalies); panel.Children.Add(_showDamage); panel.Children.Add(_showHero);
-			panel.Children.Add(_hideWhenUnfocused); panel.Children.Add(_showPreview); panel.Children.Add(_lockPosition);
+			var generalPanel = new StackPanel { Margin = new Thickness(14) };
+			generalPanel.Children.Add(_enabled);
+			generalPanel.Children.Add(_strictAnomalies);
+			AddSlider(generalPanel, "! expected result, %", "unusual", 51, 99, 1, "0");
+			AddSlider(generalPanel, "!! expected result, %", "very", 50, 99, 1, "0");
+			AddSlider(generalPanel, "!!! expected result, %", "extreme", 50, 100, 1, "0");
+			generalPanel.Children.Add(_showAnomalies);
+			generalPanel.Children.Add(new TextBlock { Text = "Table columns", Margin = new Thickness(4, 18, 4, 4), FontWeight = FontWeights.SemiBold });
+			generalPanel.Children.Add(new TextBlock { Text = "Compact order: Win / Tie / Loss", Margin = new Thickness(4, 2, 4, 4), Foreground = Brushes.DimGray });
+			generalPanel.Children.Add(_summary); generalPanel.Children.Add(_showDamage); generalPanel.Children.Add(_showHero);
+			generalPanel.Children.Add(new TextBlock { Text = "Normal mode uses the three percentage thresholds and requires one result above 50%. Strict mode ignores those sliders: if one result has the unique highest chance but another result happens, it shows !; fixed 80% and 95% expected chances still produce !! and !!!. Equal highest chances are not an anomaly.", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.Gray, Margin = new Thickness(4, 18, 4, 2) });
 
+			var visualPanel = new StackPanel { Margin = new Thickness(14) };
+			visualPanel.Children.Add(Label("Layout", _layout)); visualPanel.Children.Add(Label("Placement", _side));
+			AddSlider(visualPanel, "Horizontal offset", "x", -500, 500, 1, "0");
+			AddSlider(visualPanel, "Vertical offset", "y", -500, 1200, 1, "0");
+			AddSlider(visualPanel, "Scale", "scale", .5, 2, .05, "0.00");
+			AddSlider(visualPanel, "Overlay opacity", "opacity", .2, 1, .05, "0.00");
+			visualPanel.Children.Add(Label("Background mode", _backgroundMode));
+			AddSlider(visualPanel, "Background opacity", "backgroundOpacity", 0, 1, .05, "0.00");
+			AddSlider(visualPanel, "Visible rows", "rows", 6, 20, 1, "0");
+			visualPanel.Children.Add(_hideWhenUnfocused); visualPanel.Children.Add(_showPreview); visualPanel.Children.Add(_lockPosition);
 			var resetRow = new DockPanel { Margin = new Thickness(4, 10, 4, 2) };
-			var reset = new Button { Content = "Reset visual settings", Width = 145, HorizontalAlignment = HorizontalAlignment.Left }; reset.Click += (_, __) => LoadVisualValues(new PluginSettings()); resetRow.Children.Add(reset); panel.Children.Add(resetRow);
+			var reset = new Button { Content = "Reset visual settings", Width = 145, HorizontalAlignment = HorizontalAlignment.Left }; reset.Click += (_, __) => LoadVisualValues(new PluginSettings()); resetRow.Children.Add(reset); visualPanel.Children.Add(resetRow);
 
 			var footer = new Grid { Margin = new Thickness(4, 10, 4, 0) }; footer.ColumnDefinitions.Add(new ColumnDefinition()); footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 			var versionRow = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Width = 218 };
@@ -74,11 +81,13 @@ namespace HistoryCombatSimulation
 			var ok = new Button { Content = "OK", Width = 72, Margin = new Thickness(4), IsDefault = true }; ok.Click += (_, __) => { Apply(); Close(); };
 			var cancel = new Button { Content = "Cancel", Width = 72, Margin = new Thickness(4) }; cancel.Click += (_, __) => Close();
 			buttons.Children.Add(apply); buttons.Children.Add(ok); buttons.Children.Add(cancel); footer.Children.Add(buttons);
-			var anomalyHelp = new TextBlock { Text = "Normal mode uses the three percentage thresholds and requires one result above 50%. Strict mode ignores those sliders: if one result has the unique highest chance but another result happens, it shows !; fixed 80% and 95% expected chances still produce !! and !!!. Equal highest chances are not an anomaly.", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.Gray, Margin = new Thickness(18, 8, 18, 2) };
-			var bottom = new StackPanel(); bottom.Children.Add(anomalyHelp); footer.Margin = new Thickness(6, 4, 18, 12); bottom.Children.Add(footer);
+			var bottom = new StackPanel(); footer.Margin = new Thickness(6, 4, 18, 12); bottom.Children.Add(footer);
 			var root = new Grid(); root.RowDefinitions.Add(new RowDefinition()); root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-			var scroll = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }; root.Children.Add(scroll); Grid.SetRow(bottom, 1); root.Children.Add(bottom);
-			Content = root; _strictAnomalies.Checked += (_, __) => UpdateAnomalySliderState(); _strictAnomalies.Unchecked += (_, __) => UpdateAnomalySliderState(); LoadValues(_settings);
+			var tabs = new TabControl { Margin = new Thickness(8, 8, 8, 0) };
+			tabs.Items.Add(new TabItem { Header = "Table", Content = new ScrollViewer { Content = generalPanel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } });
+			tabs.Items.Add(new TabItem { Header = "Visual", Content = new ScrollViewer { Content = visualPanel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } });
+			root.Children.Add(tabs); Grid.SetRow(bottom, 1); root.Children.Add(bottom);
+			Content = root; _strictAnomalies.Checked += (_, __) => UpdateAnomalySliderState(); _strictAnomalies.Unchecked += (_, __) => UpdateAnomalySliderState(); _backgroundMode.SelectionChanged += (_, __) => UpdateBackgroundOpacityState(); LoadValues(_settings);
 			Closed += (_, __) => { _closed = true; _closeCancellation.Cancel(); _closeCancellation.Dispose(); };
 		}
 
@@ -128,10 +137,10 @@ namespace HistoryCombatSimulation
 
 		private void LoadValues(PluginSettings source)
 		{
-			_enabled.IsChecked = source.Enabled; _layout.SelectedItem = source.Layout; _side.SelectedItem = source.Side; _summary.IsChecked = source.ShowMatchSummary; _showAnomalies.IsChecked = source.ShowAnomalyStatus; _showDamage.IsChecked = source.ShowDamageColumn; _showHero.IsChecked = source.ShowHeroColumn; _showPreview.IsChecked = source.ShowOverlayPreview; _strictAnomalies.IsChecked = source.StrictAnomalies; _lockPosition.IsChecked = source.LockOverlayPosition; _hideWhenUnfocused.IsChecked = source.HideWhenHearthstoneNotForeground;
+			_enabled.IsChecked = source.Enabled; _layout.SelectedItem = source.Layout; _side.SelectedItem = source.Side; _backgroundMode.SelectedItem = source.BackgroundMode; _summary.IsChecked = source.ShowMatchSummary; _showAnomalies.IsChecked = source.ShowAnomalyStatus; _showDamage.IsChecked = source.ShowDamageColumn; _showHero.IsChecked = source.ShowHeroColumn; _showPreview.IsChecked = source.ShowOverlayPreview; _strictAnomalies.IsChecked = source.StrictAnomalies; _lockPosition.IsChecked = source.LockOverlayPosition; _hideWhenUnfocused.IsChecked = source.HideWhenHearthstoneNotForeground;
 			Set("x", source.HorizontalOffset); Set("y", source.VerticalOffset); Set("scale", source.Scale); Set("opacity", source.Opacity); Set("backgroundOpacity", source.BackgroundOpacity); Set("rows", source.VisibleRows);
 			Set("unusual", source.UnusualExpectedPercent); Set("very", source.VeryUnusualExpectedPercent); Set("extreme", source.ExtremeExpectedPercent);
-			UpdateAnomalySliderState();
+			UpdateAnomalySliderState(); UpdateBackgroundOpacityState();
 		}
 
 		private void LoadVisualValues(PluginSettings source)
@@ -142,7 +151,7 @@ namespace HistoryCombatSimulation
 
 		private void Apply()
 		{
-			_settings.Enabled = _enabled.IsChecked == true; if(_layout.SelectedItem is HistoryLayout layout) _settings.Layout = layout; if(_side.SelectedItem is OverlaySide side) _settings.Side = side;
+			_settings.Enabled = _enabled.IsChecked == true; if(_layout.SelectedItem is HistoryLayout layout) _settings.Layout = layout; if(_side.SelectedItem is OverlaySide side) _settings.Side = side; if(_backgroundMode.SelectedItem is OverlayBackgroundMode backgroundMode) _settings.BackgroundMode = backgroundMode;
 			_settings.HorizontalOffset = Get("x"); _settings.VerticalOffset = Get("y"); _settings.Scale = Get("scale"); _settings.Opacity = Get("opacity"); _settings.BackgroundOpacity = Get("backgroundOpacity"); _settings.VisibleRows = (int)Math.Round(Get("rows"));
 			_settings.UnusualExpectedPercent = Get("unusual"); _settings.VeryUnusualExpectedPercent = Get("very"); _settings.ExtremeExpectedPercent = Get("extreme"); _settings.ShowMatchSummary = _summary.IsChecked == true; _settings.ShowAnomalyStatus = _showAnomalies.IsChecked == true; _settings.ShowDamageColumn = _showDamage.IsChecked == true; _settings.ShowHeroColumn = _showHero.IsChecked == true; _settings.ShowOverlayPreview = _showPreview.IsChecked == true; _settings.StrictAnomalies = _strictAnomalies.IsChecked == true; _settings.LockOverlayPosition = _lockPosition.IsChecked == true; _settings.HideWhenHearthstoneNotForeground = _hideWhenUnfocused.IsChecked == true;
 			_settings.Normalize(); _settings.Save(); LoadValues(_settings); _applied();
@@ -167,6 +176,12 @@ namespace HistoryCombatSimulation
 		{
 			var enabled = _strictAnomalies.IsChecked != true;
 			foreach(var key in new[] { "unusual", "very", "extreme" }) if(_sliderRows.TryGetValue(key, out var row)) row.IsEnabled = enabled;
+		}
+
+		private void UpdateBackgroundOpacityState()
+		{
+			if(_sliderRows.TryGetValue("backgroundOpacity", out var row))
+				row.IsEnabled = !Equals(_backgroundMode.SelectedItem, OverlayBackgroundMode.Transparent);
 		}
 
 		private static FrameworkElement Label(string label, FrameworkElement input) { var panel = new DockPanel(); panel.Children.Add(new TextBlock { Text = label, Width = 165, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4) }); panel.Children.Add(input); return panel; }

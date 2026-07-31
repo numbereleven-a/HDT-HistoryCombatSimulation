@@ -7,6 +7,7 @@ namespace HistoryCombatSimulation
 {
 	public enum HistoryLayout { Normal, Compact }
 	public enum OverlaySide { Left, Right }
+	public enum OverlayBackgroundMode { Full, Header, Transparent }
 
 	public sealed class PluginSettings
 	{
@@ -19,6 +20,7 @@ namespace HistoryCombatSimulation
 		public double Scale { get; set; } = 1;
 		public double Opacity { get; set; } = 1;
 		public double BackgroundOpacity { get; set; } = 1;
+		public OverlayBackgroundMode BackgroundMode { get; set; } = OverlayBackgroundMode.Full;
 		public int VisibleRows { get; set; } = 14;
 		public double UnusualExpectedPercent { get; set; } = 51;
 		public double VeryUnusualExpectedPercent { get; set; } = 80;
@@ -49,7 +51,7 @@ namespace HistoryCombatSimulation
 		public void CopyFrom(PluginSettings other)
 		{
 			Enabled = other.Enabled; Layout = other.Layout; Side = other.Side; HorizontalOffset = other.HorizontalOffset; VerticalOffset = other.VerticalOffset;
-			Scale = other.Scale; Opacity = other.Opacity; BackgroundOpacity = other.BackgroundOpacity; VisibleRows = other.VisibleRows; UnusualExpectedPercent = other.UnusualExpectedPercent;
+			Scale = other.Scale; Opacity = other.Opacity; BackgroundOpacity = other.BackgroundOpacity; BackgroundMode = other.BackgroundMode; VisibleRows = other.VisibleRows; UnusualExpectedPercent = other.UnusualExpectedPercent;
 			VeryUnusualExpectedPercent = other.VeryUnusualExpectedPercent; ExtremeExpectedPercent = other.ExtremeExpectedPercent; ShowMatchSummary = other.ShowMatchSummary; LockOverlayPosition = other.LockOverlayPosition; HideWhenHearthstoneNotForeground = other.HideWhenHearthstoneNotForeground; ShowAnomalyStatus = other.ShowAnomalyStatus; ShowDamageColumn = other.ShowDamageColumn; ShowHeroColumn = other.ShowHeroColumn; ShowOverlayPreview = other.ShowOverlayPreview; StrictAnomalies = other.StrictAnomalies;
 		}
 
