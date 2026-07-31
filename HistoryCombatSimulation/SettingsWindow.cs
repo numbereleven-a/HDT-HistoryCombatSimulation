@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 
 namespace HistoryCombatSimulation
@@ -41,9 +42,7 @@ namespace HistoryCombatSimulation
 		{
 			_settings = settings; _applied = applied; _installedVersion = installedVersion; Title = "History Combat Simulation settings"; Width = 500; Height = 720; ResizeMode = ResizeMode.NoResize;
 			_showPreview.ToolTip = "Show example combat rows when no combat history is available.";
-			var owner = Application.Current?.MainWindow;
-			if(owner != null && !ReferenceEquals(owner, this)) { Owner = owner; WindowStartupLocation = WindowStartupLocation.CenterOwner; }
-			else WindowStartupLocation = WindowStartupLocation.CenterScreen;
+			ConfigureOwner();
 			var generalPanel = new StackPanel { Margin = new Thickness(14) };
 			generalPanel.Children.Add(_enabled);
 			generalPanel.Children.Add(_strictAnomalies);
@@ -89,6 +88,26 @@ namespace HistoryCombatSimulation
 			root.Children.Add(tabs); Grid.SetRow(bottom, 1); root.Children.Add(bottom);
 			Content = root; _strictAnomalies.Checked += (_, __) => UpdateAnomalySliderState(); _strictAnomalies.Unchecked += (_, __) => UpdateAnomalySliderState(); _backgroundMode.SelectionChanged += (_, __) => UpdateBackgroundOpacityState(); LoadValues(_settings);
 			Closed += (_, __) => { _closed = true; _closeCancellation.Cancel(); _closeCancellation.Dispose(); };
+		}
+
+		private void ConfigureOwner()
+		{
+			var owner = Application.Current?.MainWindow;
+			if(owner == null || ReferenceEquals(owner, this) || new WindowInteropHelper(owner).Handle == IntPtr.Zero)
+			{
+				WindowStartupLocation = WindowStartupLocation.CenterScreen;
+				return;
+			}
+
+			try
+			{
+				Owner = owner;
+				WindowStartupLocation = WindowStartupLocation.CenterOwner;
+			}
+			catch(InvalidOperationException)
+			{
+				WindowStartupLocation = WindowStartupLocation.CenterScreen;
+			}
 		}
 
 		private async System.Threading.Tasks.Task CheckForUpdatesAsync(Button button)
