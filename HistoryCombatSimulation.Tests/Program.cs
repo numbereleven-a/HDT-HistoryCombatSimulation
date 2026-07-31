@@ -7,6 +7,7 @@ using System.Net.Http;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows;
 using System.Xml.Serialization;
 using HistoryCombatSimulation;
 
@@ -36,6 +37,7 @@ internal static class Program
 		AnomaliesAndSummaryAreSymmetric();
 		VersionParsingAndManualUpdateCheck();
 		VersionAndMovementDefaultsAreStable();
+		SettingsOpenWithoutInitializedOwnerHandle();
 		Console.WriteLine("All HistoryCombatSimulation tests passed.");
 		return 0;
 	}
@@ -284,8 +286,8 @@ internal static class Program
 
 	private static void VersionAndMovementDefaultsAreStable()
 	{
-		Equal("1.3", PluginVersion.Display, "short displayed version"); Equal("1.3", PluginVersion.LocalRelease, "stable release label"); Equal("1.3", PluginVersion.Hdt.ToString(), "HDT version has no trailing zeroes");
-		Equal("1.3", typeof(PluginVersion).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion, "assembly informational version has no source revision suffix");
+		Equal("1.3.1", PluginVersion.Display, "short displayed version"); Equal("1.3.1", PluginVersion.LocalRelease, "stable release label"); Equal("1.3.1", PluginVersion.Hdt.ToString(), "HDT version has no trailing zeroes");
+		Equal(PluginVersion.LocalRelease, typeof(PluginVersion).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion, "assembly informational version matches local release label");
 		var settings = new PluginSettings(); True(settings.LockOverlayPosition, "overlay movement is locked by default"); True(settings.ShowAnomalyStatus, "anomaly status is shown by default");
 		False(settings.ShowDamageColumn, "combat damage column is hidden by default"); True(settings.ShowHeroColumn, "hero column is shown by default");
 		True(settings.StrictAnomalies, "strict anomaly mode is enabled by default");
@@ -303,6 +305,28 @@ internal static class Program
 		var invalid = new PluginSettings { Scale = double.NaN, BackgroundOpacity = double.PositiveInfinity }; invalid.Normalize(); Near(1, invalid.Scale, "non-finite settings use a safe fallback"); Near(1, invalid.BackgroundOpacity, "non-finite background opacity uses a safe fallback");
 		Throws<ArgumentOutOfRangeException>(() => new SimulationProbabilities(double.NaN, 0, 1), "probability model rejects NaN");
 		Throws<ArgumentOutOfRangeException>(() => new SimulationProbabilities(.8, .8, 0), "probability model rejects an invalid total");
+	}
+
+	private static void SettingsOpenWithoutInitializedOwnerHandle()
+	{
+		Exception? failure = null;
+		var thread = new Thread(() =>
+		{
+			try
+			{
+				var application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+				var owner = new Window();
+				application.MainWindow = owner;
+
+				var settingsWindow = new SettingsWindow(new PluginSettings(), () => { }, PluginVersion.Hdt);
+				Equal(WindowStartupLocation.CenterScreen, settingsWindow.WindowStartupLocation, "settings use the screen when the owner handle is unavailable");
+				settingsWindow.Close(); owner.Close(); application.Shutdown();
+			}
+			catch(Exception ex) { failure = ex; }
+		});
+		thread.SetApartmentState(ApartmentState.STA);
+		thread.Start(); thread.Join();
+		if(failure != null) throw new InvalidOperationException("settings should open without a game window", failure);
 	}
 
 	private static void VersionParsingAndManualUpdateCheck()
