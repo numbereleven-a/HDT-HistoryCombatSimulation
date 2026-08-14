@@ -23,6 +23,7 @@ namespace HistoryCombatSimulation
 			left.FriendlyBefore == right.FriendlyBefore && left.FriendlyAfter == right.FriendlyAfter
 			&& left.OpponentBefore == right.OpponentBefore && left.OpponentAfter == right.OpponentAfter
 			&& left.FriendlyDamageObserved == right.FriendlyDamageObserved && left.OpponentDamageObserved == right.OpponentDamageObserved
+			&& left.UncertainReconnect == right.UncertainReconnect
 			&& left.FriendlyDamageAmount == right.FriendlyDamageAmount && left.OpponentDamageAmount == right.OpponentDamageAmount;
 	}
 }

@@ -10,6 +10,7 @@ namespace HistoryCombatSimulation
 {
 	public sealed class BobsBuddyResultsSource : IDisposable
 	{
+		private readonly object _sync = new object();
 		private BobsBuddyPanel? _panel;
 		private int? _activeTurn;
 		private bool _postCombatRecovery;
@@ -21,70 +22,91 @@ namespace HistoryCombatSimulation
 
 		public bool TryAttach()
 		{
-			if(_panel != null) return true;
 			try
 			{
 				var panel = Core.Overlay?.FindName("BobsBuddyDisplay") as BobsBuddyPanel;
-				if(panel == null)
+				lock(_sync)
 				{
-					_attachMisses++;
-					if(_attachMisses == 5)
-						PluginLog.Warn("Bob's Buddy panel is not ready; attachment will continue in the background.");
-					return false;
+					if(ReferenceEquals(panel, _panel)) return panel != null;
+					if(_panel != null) _panel.PropertyChanged -= OnPropertyChanged;
+					_panel = null;
+					if(panel == null)
+					{
+						_attachMisses++;
+						if(_attachMisses == 5)
+							PluginLog.Warn("Bob's Buddy panel is not ready; attachment will continue in the background.");
+						return false;
+					}
+					_panel = panel;
+					panel.PropertyChanged += OnPropertyChanged;
+					_attachMisses = 0;
+					_attachFailureLogged = false;
 				}
-				_panel = panel; panel.PropertyChanged += OnPropertyChanged; return true;
+				return true;
 			}
 			catch(Exception ex)
 			{
-				if(!_attachFailureLogged)
+				var shouldLog = false;
+				lock(_sync)
 				{
-					_attachFailureLogged = true;
-					PluginLog.Warn("Bob's Buddy panel attachment failed", ex);
+					if(!_attachFailureLogged) { _attachFailureLogged = true; shouldLog = true; }
 				}
+				if(shouldLog) PluginLog.Warn("Bob's Buddy panel attachment failed", ex);
 				return false;
 			}
 		}
 
 		public void BeginCombat(int turn, bool guardedRecovery = false)
 		{
-			_activeTurn = turn; _postCombatRecovery = false; _gate.BeginCombat(guardedRecovery);
+			lock(_sync) { _activeTurn = turn; _postCombatRecovery = false; _gate.BeginCombat(guardedRecovery); }
 		}
 
 		public void PollRecovery() => TryPublishSafely(true);
-		public void BeginPostCombatRecovery() { if(_activeTurn.HasValue) _postCombatRecovery = true; }
-		public void PollLateRecovery() { if(_postCombatRecovery) TryPublishSafely(true, allowPostCombatState: true); }
-		public void EnableGuardedRecovery() => _gate.EnableGuardedRecovery();
+		public void BeginPostCombatRecovery() { lock(_sync) { if(_activeTurn.HasValue) _postCombatRecovery = true; } }
+		public void PollLateRecovery() { lock(_sync) { if(!_postCombatRecovery) return; } TryPublishSafely(true, allowPostCombatState: true); }
+		public void EnableGuardedRecovery() { lock(_sync) _gate.EnableGuardedRecovery(); }
 
-		public void EndCombat() { _activeTurn = null; _postCombatRecovery = false; _gate.EndCombat(); }
+		public void EndCombat() { lock(_sync) EndCombatLocked(); }
+		private void EndCombatLocked() { _activeTurn = null; _postCombatRecovery = false; _gate.EndCombat(); }
 		private void OnPropertyChanged(object? sender, PropertyChangedEventArgs e)
 		{
-			if(_panel == null || !_activeTurn.HasValue) return;
-			TryPublishSafely(false, _postCombatRecovery);
+			bool allowPostCombatState;
+			lock(_sync)
+			{
+				if(!ReferenceEquals(sender, _panel) || !_activeTurn.HasValue) return;
+				allowPostCombatState = _postCombatRecovery;
+			}
+			TryPublishSafely(false, allowPostCombatState);
 		}
 
 		private void TryPublishSafely(bool guardedCheck, bool allowPostCombatState = false)
 		{
-			try { TryPublish(guardedCheck, allowPostCombatState); }
+			SimulationResultEventArgs? result = null;
+			try { lock(_sync) result = TryPublishLocked(guardedCheck, allowPostCombatState); }
 			catch(Exception ex)
 			{
-				if(_readFailureLogged) return;
-				_readFailureLogged = true;
+				lock(_sync)
+				{
+					if(_readFailureLogged) return;
+					_readFailureLogged = true;
+				}
 				PluginLog.Error("Bob's Buddy result read failed", ex);
 			}
+			if(result != null) ResultAvailable?.Invoke(this, result);
 		}
 
-		private void TryPublish(bool guardedCheck, bool allowPostCombatState = false)
+		private SimulationResultEventArgs? TryPublishLocked(bool guardedCheck, bool allowPostCombatState = false)
 		{
 			var panel = _panel;
 			if(panel == null || !_activeTurn.HasValue)
-				return;
+				return null;
 			var state = MapState(panel.State);
 			var game = Core.Game;
-			if(_postCombatRecovery && game?.IsBattlegroundsCombatPhase == true && CombatTurnBoundary.HasAdvanced(_activeTurn.Value, game.GetTurnNumber())) { EndCombat(); return; }
+			if(_postCombatRecovery && game?.IsBattlegroundsCombatPhase == true && CombatTurnBoundary.HasAdvanced(_activeTurn.Value, game.GetTurnNumber())) { EndCombatLocked(); return null; }
 			if(!_gate.TryCapture(state, panel.ErrorState == BobsBuddyErrorState.None, panel.PercentagesVisibility == Visibility.Visible, panel.WinRateDisplay, panel.TieRateDisplay, panel.LossRateDisplay, CultureInfo.CurrentCulture, out var probabilities, guardedCheck, allowPostCombatState) || probabilities == null)
-				return;
+				return null;
 			_readFailureLogged = false;
-			ResultAvailable?.Invoke(this, new SimulationResultEventArgs(_activeTurn.Value, probabilities!));
+			return new SimulationResultEventArgs(_activeTurn.Value, probabilities!);
 		}
 
 		private static BobsBuddyCaptureState MapState(BobsBuddyState state)
@@ -99,8 +121,11 @@ namespace HistoryCombatSimulation
 		}
 		public void Dispose()
 		{
-			if(_panel != null) _panel.PropertyChanged -= OnPropertyChanged;
-			_panel = null; EndCombat();
+			lock(_sync)
+			{
+				if(_panel != null) _panel.PropertyChanged -= OnPropertyChanged;
+				_panel = null; EndCombatLocked();
+			}
 		}
 	}
 

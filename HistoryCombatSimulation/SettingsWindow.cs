@@ -15,7 +15,7 @@ namespace HistoryCombatSimulation
 	public sealed class SettingsWindow : Window
 	{
 		private readonly PluginSettings _settings;
-		private readonly Action _applied;
+		private readonly Action<PluginSettings> _applied;
 		private readonly ComboBox _layout = new ComboBox { ItemsSource = Enum.GetValues(typeof(HistoryLayout)), Margin = new Thickness(4) };
 		private readonly ComboBox _side = new ComboBox { ItemsSource = Enum.GetValues(typeof(OverlaySide)), Margin = new Thickness(4) };
 		private readonly ComboBox _backgroundMode = new ComboBox { ItemsSource = Enum.GetValues(typeof(OverlayBackgroundMode)), Margin = new Thickness(4) };
@@ -26,7 +26,7 @@ namespace HistoryCombatSimulation
 		private readonly VersionChecker _versionChecker = new VersionChecker();
 		private readonly Version _installedVersion;
 		private readonly CancellationTokenSource _closeCancellation = new CancellationTokenSource();
-		private readonly TextBlock _versionText = new TextBlock { Width = 191, FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Foreground = Brushes.DimGray, TextTrimming = TextTrimming.CharacterEllipsis };
+		private readonly TextBlock _versionText = new TextBlock { FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Foreground = Brushes.DimGray, TextTrimming = TextTrimming.CharacterEllipsis };
 		private bool _closed;
 		private readonly CheckBox _enabled = Check("Enabled");
 		private readonly CheckBox _summary = Check("Expected vs actual summary");
@@ -38,16 +38,16 @@ namespace HistoryCombatSimulation
 		private readonly CheckBox _showPreview = Check("Show overlay preview");
 		private readonly CheckBox _strictAnomalies = Check("Strict anomaly mode");
 
-		public SettingsWindow(PluginSettings settings, Action applied, Version installedVersion)
+		public SettingsWindow(PluginSettings settings, Action<PluginSettings> applied, Version installedVersion)
 		{
-			_settings = settings; _applied = applied; _installedVersion = installedVersion; Title = "History Combat Simulation settings"; Width = 500; Height = 720; ResizeMode = ResizeMode.NoResize;
+			_settings = settings; _applied = applied; _installedVersion = installedVersion; Title = "History Combat Simulation settings"; Width = 500; Height = 720; MinWidth = 500; MinHeight = 600; ResizeMode = ResizeMode.CanResize;
 			_showPreview.ToolTip = "Show example combat rows when no combat history is available.";
 			ConfigureOwner();
 			var generalPanel = new StackPanel { Margin = new Thickness(14) };
 			generalPanel.Children.Add(_enabled);
 			generalPanel.Children.Add(_strictAnomalies);
 			AddSlider(generalPanel, "! expected result, %", "unusual", 51, 99, 1, "0");
-			AddSlider(generalPanel, "!! expected result, %", "very", 50, 99, 1, "0");
+			AddSlider(generalPanel, "!! expected result, %", "very", 51, 99, 1, "0");
 			AddSlider(generalPanel, "!!! expected result, %", "extreme", 50, 100, 1, "0");
 			generalPanel.Children.Add(_showAnomalies);
 			generalPanel.Children.Add(new TextBlock { Text = "Table columns", Margin = new Thickness(4, 18, 4, 4), FontWeight = FontWeights.SemiBold });
@@ -57,8 +57,8 @@ namespace HistoryCombatSimulation
 
 			var visualPanel = new StackPanel { Margin = new Thickness(14) };
 			visualPanel.Children.Add(Label("Layout", _layout)); visualPanel.Children.Add(Label("Placement", _side));
-			AddSlider(visualPanel, "Horizontal offset", "x", -500, 500, 1, "0");
-			AddSlider(visualPanel, "Vertical offset", "y", -500, 1200, 1, "0");
+			AddSlider(visualPanel, "Horizontal offset", "x", PluginSettings.MinimumPositionOffset, PluginSettings.MaximumPositionOffset, 1, "0");
+			AddSlider(visualPanel, "Vertical offset", "y", PluginSettings.MinimumPositionOffset, PluginSettings.MaximumPositionOffset, 1, "0");
 			AddSlider(visualPanel, "Scale", "scale", .5, 2, .05, "0.00");
 			AddSlider(visualPanel, "Overlay opacity", "opacity", .2, 1, .05, "0.00");
 			visualPanel.Children.Add(Label("Background mode", _backgroundMode));
@@ -69,7 +69,7 @@ namespace HistoryCombatSimulation
 			var reset = new Button { Content = "Reset visual settings", Width = 145, HorizontalAlignment = HorizontalAlignment.Left }; reset.Click += (_, __) => LoadVisualValues(new PluginSettings()); resetRow.Children.Add(reset); visualPanel.Children.Add(resetRow);
 
 			var footer = new Grid { Margin = new Thickness(4, 10, 4, 0) }; footer.ColumnDefinitions.Add(new ColumnDefinition()); footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-			var versionRow = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Width = 218 };
+			var versionRow = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
 			var checkUpdates = new Button { Content = "↻", Width = 22, Height = 20, Padding = new Thickness(0), ToolTip = "Check for updates", Margin = new Thickness(0, 0, 5, 0) };
 			checkUpdates.Click += async (_, __) => await CheckForUpdatesAsync(checkUpdates);
 			versionRow.Children.Add(checkUpdates);
@@ -86,7 +86,7 @@ namespace HistoryCombatSimulation
 			tabs.Items.Add(new TabItem { Header = "Table", Content = new ScrollViewer { Content = generalPanel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } });
 			tabs.Items.Add(new TabItem { Header = "Visual", Content = new ScrollViewer { Content = visualPanel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } });
 			root.Children.Add(tabs); Grid.SetRow(bottom, 1); root.Children.Add(bottom);
-			Content = root; _strictAnomalies.Checked += (_, __) => UpdateAnomalySliderState(); _strictAnomalies.Unchecked += (_, __) => UpdateAnomalySliderState(); _backgroundMode.SelectionChanged += (_, __) => UpdateBackgroundOpacityState(); LoadValues(_settings);
+			Content = root; _strictAnomalies.Checked += (_, __) => UpdateAnomalySliderState(); _strictAnomalies.Unchecked += (_, __) => UpdateAnomalySliderState(); _backgroundMode.SelectionChanged += (_, __) => UpdateBackgroundOpacityState(); LoadValues(_settings.Snapshot());
 			Closed += (_, __) => { _closed = true; _closeCancellation.Cancel(); _closeCancellation.Dispose(); };
 		}
 
@@ -170,15 +170,16 @@ namespace HistoryCombatSimulation
 
 		private void Apply()
 		{
-			_settings.Enabled = _enabled.IsChecked == true; if(_layout.SelectedItem is HistoryLayout layout) _settings.Layout = layout; if(_side.SelectedItem is OverlaySide side) _settings.Side = side; if(_backgroundMode.SelectedItem is OverlayBackgroundMode backgroundMode) _settings.BackgroundMode = backgroundMode;
-			_settings.HorizontalOffset = Get("x"); _settings.VerticalOffset = Get("y"); _settings.Scale = Get("scale"); _settings.Opacity = Get("opacity"); _settings.BackgroundOpacity = Get("backgroundOpacity"); _settings.VisibleRows = (int)Math.Round(Get("rows"));
-			_settings.UnusualExpectedPercent = Get("unusual"); _settings.VeryUnusualExpectedPercent = Get("very"); _settings.ExtremeExpectedPercent = Get("extreme"); _settings.ShowMatchSummary = _summary.IsChecked == true; _settings.ShowAnomalyStatus = _showAnomalies.IsChecked == true; _settings.ShowDamageColumn = _showDamage.IsChecked == true; _settings.ShowHeroColumn = _showHero.IsChecked == true; _settings.ShowOverlayPreview = _showPreview.IsChecked == true; _settings.StrictAnomalies = _strictAnomalies.IsChecked == true; _settings.LockOverlayPosition = _lockPosition.IsChecked == true; _settings.HideWhenHearthstoneNotForeground = _hideWhenUnfocused.IsChecked == true;
-			_settings.Normalize(); _settings.Save(); LoadValues(_settings); _applied();
+			var candidate = _settings.Snapshot();
+			candidate.Enabled = _enabled.IsChecked == true; if(_layout.SelectedItem is HistoryLayout layout) candidate.Layout = layout; if(_side.SelectedItem is OverlaySide side) candidate.Side = side; if(_backgroundMode.SelectedItem is OverlayBackgroundMode backgroundMode) candidate.BackgroundMode = backgroundMode;
+			candidate.HorizontalOffset = Get("x"); candidate.VerticalOffset = Get("y"); candidate.Scale = Get("scale"); candidate.Opacity = Get("opacity"); candidate.BackgroundOpacity = Get("backgroundOpacity"); candidate.VisibleRows = (int)Math.Round(Get("rows"));
+			candidate.UnusualExpectedPercent = Get("unusual"); candidate.VeryUnusualExpectedPercent = Get("very"); candidate.ExtremeExpectedPercent = Get("extreme"); candidate.ShowMatchSummary = _summary.IsChecked == true; candidate.ShowAnomalyStatus = _showAnomalies.IsChecked == true; candidate.ShowDamageColumn = _showDamage.IsChecked == true; candidate.ShowHeroColumn = _showHero.IsChecked == true; candidate.ShowOverlayPreview = _showPreview.IsChecked == true; candidate.StrictAnomalies = _strictAnomalies.IsChecked == true; candidate.LockOverlayPosition = _lockPosition.IsChecked == true; candidate.HideWhenHearthstoneNotForeground = _hideWhenUnfocused.IsChecked == true;
+			candidate.Normalize(); _applied(candidate); LoadValues(_settings.Snapshot());
 		}
 
 		public void SyncPosition()
 		{
-			Set("x", _settings.HorizontalOffset); Set("y", _settings.VerticalOffset);
+			var snapshot = _settings.Snapshot(); Set("x", snapshot.HorizontalOffset); Set("y", snapshot.VerticalOffset);
 		}
 
 		private void AddSlider(Panel panel, string label, string key, double minimum, double maximum, double tick, string format)

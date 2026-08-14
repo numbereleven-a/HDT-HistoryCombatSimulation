@@ -26,7 +26,7 @@ namespace HistoryCombatSimulation
 			var friendly = FindHero(heroes, GetLocalPlayerId());
 			if(opponent == null || opponentId <= 0)
 				return null;
-			return new CombatSnapshot(Turn, opponentId, opponent.Id, opponent.CardId ?? string.Empty, opponent.Health <= 0,
+			return new CombatSnapshot(Turn, opponentId, opponent.Id, opponent.CardId ?? string.Empty, IsKnownDefeatedHero(opponent),
 				Durability(friendly), Durability(opponent));
 		}
 
@@ -57,6 +57,7 @@ namespace HistoryCombatSimulation
 		}
 
 		private static int? Durability(Entity? hero) => hero == null ? (int?)null : hero.Health + hero.GetTag(GameTag.ARMOR);
+		private static bool IsKnownDefeatedHero(Entity hero) => hero.GetTag(GameTag.HEALTH) > 0 && hero.Health <= 0;
 		private static bool TryScanHeroes(IEnumerable<Entity>? entities, out Entity[] heroes)
 		{
 			heroes = Array.Empty<Entity>();

@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 
 namespace HistoryCombatSimulation
 {
@@ -42,13 +43,26 @@ namespace HistoryCombatSimulation
 		public double Loss { get; }
 		public bool Equals(SimulationProbabilities? other) => other != null && Win.Equals(other.Win) && Tie.Equals(other.Tie) && Loss.Equals(other.Loss);
 		public override bool Equals(object? obj) => Equals(obj as SimulationProbabilities);
-		public override int GetHashCode() => Win.GetHashCode() ^ Tie.GetHashCode() ^ Loss.GetHashCode();
+		public override int GetHashCode()
+		{
+			unchecked
+			{
+				var hash = 17;
+				hash = hash * 31 + Win.GetHashCode();
+				hash = hash * 31 + Tie.GetHashCode();
+				hash = hash * 31 + Loss.GetHashCode();
+				return hash;
+			}
+		}
 		private static bool IsProbability(double value) => !double.IsNaN(value) && !double.IsInfinity(value) && value >= 0 && value <= 1;
 	}
 
 	public sealed class CombatRow
 	{
-		internal CombatRow(CombatSnapshot snapshot) { Snapshot = snapshot; }
+		private static long _nextIdentity;
+		internal CombatRow(CombatSnapshot snapshot) : this(snapshot, Interlocked.Increment(ref _nextIdentity)) { }
+		internal CombatRow(CombatSnapshot snapshot, long identity) { Snapshot = snapshot; Identity = identity; }
+		internal long Identity { get; }
 		public CombatSnapshot Snapshot { get; }
 		public SimulationProbabilities? Probabilities { get; internal set; }
 		public CombatOutcome Outcome { get; internal set; }

@@ -10,6 +10,7 @@ namespace HistoryCombatSimulation
 {
 	public sealed class HistoryCombatSimulationPlugin : IPlugin
 	{
+		private readonly object _stateSync = new object();
 		private readonly CombatHistoryTracker _tracker = new CombatHistoryTracker();
 		private readonly BattlegroundsGameAdapter _game = new BattlegroundsGameAdapter();
 		private readonly BobsBuddyResultsSource _bobsBuddy = new BobsBuddyResultsSource();
@@ -29,7 +30,7 @@ namespace HistoryCombatSimulation
 		private MenuItem? _menu;
 		private MenuItem? _enabledMenuItem;
 		private MenuItem? _lockMenuItem;
-		private bool _loaded;
+		private volatile bool _loaded;
 		private bool? _wasCombat;
 		private bool _insideSoloMatch;
 		private long _matchEpoch;
@@ -84,18 +85,26 @@ namespace HistoryCombatSimulation
 		{
 			_loaded = false;
 			HdtEventBridge.Detach(this);
-			_tracker.Changed -= OnHistoryChanged;
-			_bobsBuddy.ResultAvailable -= OnSimulationResult;
-			_overlay.PositionChanged -= OnOverlayPositionChanged;
-			_bobsBuddy.Dispose();
-			_tracker.Unload();
-			InvokeUi(() => { _settingsWindow?.Close(); _settingsWindow = null; _overlay.Detach(); });
-			_settings.Save();
+			lock(_stateSync)
+			{
+				_tracker.Changed -= OnHistoryChanged;
+				_bobsBuddy.ResultAvailable -= OnSimulationResult;
+				_overlay.PositionChanged -= OnOverlayPositionChanged;
+				_bobsBuddy.Dispose();
+				_tracker.Unload();
+				InvokeUi(() => { lock(_stateSync) { _settingsWindow?.Close(); _settingsWindow = null; _overlay.Detach(); } });
+				_settings.Save();
+			}
 		}
 
 		public void OnButtonPress() => ShowSettings();
 
 		public void OnUpdate()
+		{
+			lock(_stateSync) UpdateCore();
+		}
+
+		private void UpdateCore()
 		{
 			if(!_loaded) return;
 			try
@@ -105,7 +114,7 @@ namespace HistoryCombatSimulation
 					_attachRetry.Restart();
 					InvokeUi(() =>
 					{
-						if(_overlay.Attach()) RefreshOverlay();
+						if(_overlay.Attach()) { lock(_stateSync) RefreshOverlay(); }
 						_bobsBuddy.TryAttach();
 					});
 				}
@@ -126,7 +135,7 @@ namespace HistoryCombatSimulation
 				if(_activeSnapshot != null && _combatTurnAdvanceGate.ShouldRollOver(_activeSnapshot.Turn, _game.Turn, combat, _uptime.ElapsedMilliseconds)) FinalizeInterruptedCombat();
 				if(combat && _activeSnapshot == null && _skippedCombatTurn != _game.Turn) TryBeginCombat(_observedCombatStart && !_damageObservedBeforeSnapshot);
 				if(combat && _activeSnapshot != null && _game.IsReconnect && !_reconnectRecoveryActive) { _reconnectRecoveryActive = true; _missingSimulationPoll.Restart(); InvokeUi(_bobsBuddy.EnableGuardedRecovery); }
-				if(combat && _activeSnapshot != null && _tracker.ActiveRow?.Probabilities == null && _missingSimulationPoll.ElapsedMilliseconds >= (_reconnectRecoveryActive ? 10000 : 2000)) { _missingSimulationPoll.Restart(); InvokeUi(_bobsBuddy.PollRecovery); }
+				if(combat && _activeSnapshot != null && !_tracker.ActiveRowHasSimulation && _missingSimulationPoll.ElapsedMilliseconds >= (_reconnectRecoveryActive ? 10000 : 2000)) { _missingSimulationPoll.Restart(); InvokeUi(_bobsBuddy.PollRecovery); }
 				if(_wasCombat == true && !combat) FinalizeActiveCombat();
 				if(!combat) TryRecoverUnknownOutcome();
 				_wasCombat = combat; _updateFailureLogged = false; PumpOverlay();
@@ -175,7 +184,7 @@ namespace HistoryCombatSimulation
 			var evidence = _game.GetOutcomeEvidence(snapshot, _friendlyDamageAmount, _opponentDamageAmount, forceUncertain);
 			var outcome = CombatOutcomeResolver.Resolve(evidence, definitiveMatchResult);
 			var damage = CombatOutcomeResolver.ResolveDamage(outcome, evidence);
-			var simulationMissing = _tracker.ActiveRow?.Probabilities == null;
+			var simulationMissing = !_tracker.ActiveRowHasSimulation;
 			if(simulationMissing) StartLateSimulationRecovery(snapshot.Turn); else _bobsBuddy.EndCombat();
 			_tracker.FinalizeCombat(snapshot.Turn, outcome, damage);
 			if(!definitiveMatchResult.HasValue && outcome == CombatOutcome.Unknown)
@@ -243,12 +252,22 @@ namespace HistoryCombatSimulation
 
 		internal void HandleGameStart()
 		{
+			lock(_stateSync) HandleGameStartCore();
+		}
+
+		private void HandleGameStartCore()
+		{
 			if(_settings.Enabled && _waitingForNextGameStart) { _waitingForNextGameStart = false; _trackingEnabled = true; }
 			if(!_trackingEnabled) return;
-			_gameStartGate.Notify(_uptime.ElapsedMilliseconds); _soloMatchReentryGate.GameStarted();
+			_gameStartGate.Notify(); _soloMatchReentryGate.GameStarted();
 		}
 
 		internal void HandleGameEnd()
+		{
+			lock(_stateSync) HandleGameEndCore();
+		}
+
+		private void HandleGameEndCore()
 		{
 			if(!_trackingEnabled || _waitingForNextGameStart || !_insideSoloMatch || _gameStartGate.IsPending) return;
 			ExitSoloMatch(); _soloMatchReentryGate.MatchEnded();
@@ -263,6 +282,11 @@ namespace HistoryCombatSimulation
 
 		internal void HandleDefinitiveMatchResult(CombatOutcome outcome)
 		{
+			lock(_stateSync) HandleDefinitiveMatchResultCore(outcome);
+		}
+
+		private void HandleDefinitiveMatchResultCore(CombatOutcome outcome)
+		{
 			if(!_trackingEnabled || _waitingForNextGameStart || !_insideSoloMatch || _gameStartGate.IsPending) return;
 			if(_activeSnapshot != null) FinalizeActiveCombat(outcome);
 			else if(_awaitingDefinitiveResultTurn.HasValue && _awaitingDefinitiveResultEpoch == _matchEpoch && _awaitingDefinitiveEvidence != null)
@@ -276,29 +300,49 @@ namespace HistoryCombatSimulation
 
 		internal void HandleDamage(PredamageInfo info)
 		{
+			lock(_stateSync) HandleDamageCore(info);
+		}
+
+		private void HandleDamageCore(PredamageInfo info)
+		{
 			if(!_trackingEnabled || _waitingForNextGameStart || _gameStartGate.IsPending || info?.Entity == null || info.Value <= 0) return;
 			if(_activeSnapshot == null) { if(_insideSoloMatch && _game.IsCombatPhase) _damageObservedBeforeSnapshot = true; return; }
+			// HDT may repeat the same predicted hero-damage event. Combat applies one final
+			// hero hit per side, so keep the strongest observation instead of summing duplicates.
 			var target = _game.IdentifyDamageTarget(info.Entity, _activeSnapshot); if(target == DamageTarget.Friendly) _friendlyDamageAmount = Math.Max(_friendlyDamageAmount, info.Value); else if(target == DamageTarget.Opponent) _opponentDamageAmount = Math.Max(_opponentDamageAmount, info.Value);
 		}
 
 		private void OnSimulationResult(object? sender, SimulationResultEventArgs e)
 		{
-			if(!_trackingEnabled || _waitingForNextGameStart) return;
-			_tracker.UpdateSimulation(e.Turn, e.Probabilities);
-			if(_lateSimulationTurn == e.Turn) StopLateSimulationRecovery();
+			lock(_stateSync)
+			{
+				if(!_trackingEnabled || _waitingForNextGameStart) return;
+				_tracker.UpdateSimulation(e.Turn, e.Probabilities);
+				if(_lateSimulationTurn == e.Turn) StopLateSimulationRecovery();
+			}
 		}
-		private void OnHistoryChanged(object? sender, EventArgs e) => RefreshOverlay();
-		private void OnOverlayPositionChanged(object? sender, EventArgs e) { _settingsWindow?.SyncPosition(); _settings.Save(); }
+		private void OnHistoryChanged(object? sender, EventArgs e) { lock(_stateSync) RefreshOverlay(); }
+		private void OnOverlayPositionChanged(object? sender, OverlayPositionChangedEventArgs e)
+		{
+			lock(_stateSync)
+			{
+				_settings.SetPosition(e.HorizontalOffset, e.VerticalOffset);
+				_settingsWindow?.SyncPosition();
+				_settings.Save();
+			}
+		}
 		private void RefreshOverlay()
 		{
-			var rows = _tracker.SnapshotRows(); var hasContentOrPreview = _insideSoloMatch || _tracker.RetainingCompletedMatch || _settings.ShowOverlayPreview || !_settings.LockOverlayPosition;
-			var focusAllowsOverlay = !_settings.HideWhenHearthstoneNotForeground || User32.IsHearthstoneInForeground();
-			_lastFocusAllowsOverlay = focusAllowsOverlay; InvokeUi(() => _overlay.Update(rows, _settings, hasContentOrPreview && focusAllowsOverlay));
+			var settings = _settings.Snapshot();
+			var rows = _tracker.SnapshotRows(); var hasContentOrPreview = _insideSoloMatch || _tracker.RetainingCompletedMatch || settings.ShowOverlayPreview || !settings.LockOverlayPosition;
+			var focusAllowsOverlay = !settings.HideWhenHearthstoneNotForeground || User32.IsHearthstoneInForeground();
+			_lastFocusAllowsOverlay = focusAllowsOverlay; InvokeUi(() => _overlay.Update(rows, settings, hasContentOrPreview && focusAllowsOverlay));
 		}
 
 		private void PumpOverlay()
 		{
-			var focusAllowsOverlay = !_settings.HideWhenHearthstoneNotForeground || User32.IsHearthstoneInForeground();
+			var settings = _settings.Snapshot();
+			var focusAllowsOverlay = !settings.HideWhenHearthstoneNotForeground || User32.IsHearthstoneInForeground();
 			var canvas = Hearthstone_Deck_Tracker.API.Core.OverlayCanvas;
 			if(canvas == null) { _lastCanvasWidth = double.NaN; _lastCanvasHeight = double.NaN; return; }
 			var width = canvas.ActualWidth; var height = canvas.ActualHeight;
@@ -309,14 +353,32 @@ namespace HistoryCombatSimulation
 		private MenuItem BuildMenu()
 		{
 			var root = new MenuItem { Header = "History Combat Simulation" };
-			_enabledMenuItem = new MenuItem { Header = "Enabled", IsCheckable = true, IsChecked = _settings.Enabled }; _enabledMenuItem.Click += (_, __) => { _settings.Enabled = _enabledMenuItem.IsChecked; ApplyEnabledState(); _settings.Save(); RefreshOverlay(); };
+			_enabledMenuItem = new MenuItem { Header = "Enabled", IsCheckable = true, IsChecked = _settings.Enabled }; _enabledMenuItem.Click += (_, __) => { lock(_stateSync) { _settings.Enabled = _enabledMenuItem.IsChecked; ApplyEnabledState(); _settings.Save(); RefreshOverlay(); } };
 			var settings = new MenuItem { Header = "Settings" }; settings.Click += (_, __) => ShowSettings();
-			_lockMenuItem = new MenuItem { Header = "Lock overlay position", IsCheckable = true, IsChecked = _settings.LockOverlayPosition }; _lockMenuItem.Click += (_, __) => { _settings.LockOverlayPosition = _lockMenuItem.IsChecked; _settings.Save(); RefreshOverlay(); };
+			_lockMenuItem = new MenuItem { Header = "Lock overlay position", IsCheckable = true, IsChecked = _settings.LockOverlayPosition }; _lockMenuItem.Click += (_, __) => { lock(_stateSync) { _settings.LockOverlayPosition = _lockMenuItem.IsChecked; _settings.Save(); RefreshOverlay(); } };
 			root.Items.Add(_enabledMenuItem); root.Items.Add(_lockMenuItem); root.Items.Add(settings); return root;
 		}
 
-		private void ShowSettings() => InvokeUi(() => { if(_settingsWindow != null) { _settingsWindow.Activate(); return; } _settingsWindow = new SettingsWindow(_settings, ApplySettings, Version); _settingsWindow.Closed += (_, __) => _settingsWindow = null; _settingsWindow.Show(); });
-		private void ApplySettings()
+		private void ShowSettings() => InvokeUi(() =>
+		{
+			lock(_stateSync)
+			{
+				if(_settingsWindow != null) { _settingsWindow.Activate(); return; }
+				_settingsWindow = new SettingsWindow(_settings, ApplySettings, Version);
+				_settingsWindow.Closed += (_, __) => { lock(_stateSync) _settingsWindow = null; };
+				_settingsWindow.Show();
+			}
+		});
+		private void ApplySettings(PluginSettings candidate)
+		{
+			lock(_stateSync)
+			{
+				_settings.CopyFrom(candidate);
+				ApplySettingsCore();
+			}
+		}
+
+		private void ApplySettingsCore()
 		{
 			_settings.Normalize();
 			ApplyEnabledState();

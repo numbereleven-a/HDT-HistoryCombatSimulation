@@ -11,7 +11,10 @@ namespace HistoryCombatSimulation
 
 	public sealed class PluginSettings
 	{
+		public const double MinimumPositionOffset = -10000;
+		public const double MaximumPositionOffset = 10000;
 		private static readonly XmlSerializer Serializer = new XmlSerializer(typeof(PluginSettings));
+		private readonly object _sync = new object();
 		public bool Enabled { get; set; } = true;
 		public HistoryLayout Layout { get; set; } = HistoryLayout.Normal;
 		public OverlaySide Side { get; set; } = OverlaySide.Right;
@@ -36,23 +39,53 @@ namespace HistoryCombatSimulation
 
 		public void Normalize()
 		{
-			HorizontalOffset = NormalizeValue(HorizontalOffset, -500, 500, 14);
-			VerticalOffset = NormalizeValue(VerticalOffset, -500, 1200, 155);
-			Scale = NormalizeValue(Scale, .5, 2, 1);
-			Opacity = NormalizeValue(Opacity, .2, 1, 1);
-			BackgroundOpacity = NormalizeValue(BackgroundOpacity, 0, 1, 1);
-			VisibleRows = Math.Max(6, Math.Min(20, VisibleRows));
-			UnusualExpectedPercent = NormalizeValue(UnusualExpectedPercent, 51, 99, 51);
-			VeryUnusualExpectedPercent = NormalizeValue(VeryUnusualExpectedPercent, UnusualExpectedPercent, 99, Math.Max(80, UnusualExpectedPercent));
-			ExtremeExpectedPercent = NormalizeValue(ExtremeExpectedPercent, VeryUnusualExpectedPercent, 100, Math.Max(95, VeryUnusualExpectedPercent));
+			lock(_sync)
+			{
+				HorizontalOffset = NormalizeValue(HorizontalOffset, MinimumPositionOffset, MaximumPositionOffset, 14);
+				VerticalOffset = NormalizeValue(VerticalOffset, MinimumPositionOffset, MaximumPositionOffset, 155);
+				Scale = NormalizeValue(Scale, .5, 2, 1);
+				Opacity = NormalizeValue(Opacity, .2, 1, 1);
+				BackgroundOpacity = NormalizeValue(BackgroundOpacity, 0, 1, 1);
+				VisibleRows = Math.Max(6, Math.Min(20, VisibleRows));
+				UnusualExpectedPercent = NormalizeValue(UnusualExpectedPercent, 51, 99, 51);
+				VeryUnusualExpectedPercent = NormalizeValue(VeryUnusualExpectedPercent, UnusualExpectedPercent, 99, Math.Max(80, UnusualExpectedPercent));
+				ExtremeExpectedPercent = NormalizeValue(ExtremeExpectedPercent, VeryUnusualExpectedPercent, 100, Math.Max(95, VeryUnusualExpectedPercent));
+			}
 		}
 
-		public AnomalyThresholds GetThresholds() => new AnomalyThresholds(UnusualExpectedPercent / 100, VeryUnusualExpectedPercent / 100, ExtremeExpectedPercent / 100);
+		public AnomalyThresholds GetThresholds() { lock(_sync) return new AnomalyThresholds(UnusualExpectedPercent / 100, VeryUnusualExpectedPercent / 100, ExtremeExpectedPercent / 100); }
+
+		public void SetPosition(double horizontalOffset, double verticalOffset)
+		{
+			lock(_sync) { HorizontalOffset = horizontalOffset; VerticalOffset = verticalOffset; }
+		}
+
+		public PluginSettings Snapshot()
+		{
+			lock(_sync)
+			{
+				return new PluginSettings
+				{
+					Enabled = Enabled, Layout = Layout, Side = Side, HorizontalOffset = HorizontalOffset, VerticalOffset = VerticalOffset,
+					Scale = Scale, Opacity = Opacity, BackgroundOpacity = BackgroundOpacity, BackgroundMode = BackgroundMode,
+					VisibleRows = VisibleRows, UnusualExpectedPercent = UnusualExpectedPercent, VeryUnusualExpectedPercent = VeryUnusualExpectedPercent,
+					ExtremeExpectedPercent = ExtremeExpectedPercent, ShowMatchSummary = ShowMatchSummary,
+					LockOverlayPosition = LockOverlayPosition, HideWhenHearthstoneNotForeground = HideWhenHearthstoneNotForeground,
+					ShowAnomalyStatus = ShowAnomalyStatus, ShowDamageColumn = ShowDamageColumn, ShowHeroColumn = ShowHeroColumn,
+					ShowOverlayPreview = ShowOverlayPreview, StrictAnomalies = StrictAnomalies
+				};
+			}
+		}
+
 		public void CopyFrom(PluginSettings other)
 		{
-			Enabled = other.Enabled; Layout = other.Layout; Side = other.Side; HorizontalOffset = other.HorizontalOffset; VerticalOffset = other.VerticalOffset;
-			Scale = other.Scale; Opacity = other.Opacity; BackgroundOpacity = other.BackgroundOpacity; BackgroundMode = other.BackgroundMode; VisibleRows = other.VisibleRows; UnusualExpectedPercent = other.UnusualExpectedPercent;
-			VeryUnusualExpectedPercent = other.VeryUnusualExpectedPercent; ExtremeExpectedPercent = other.ExtremeExpectedPercent; ShowMatchSummary = other.ShowMatchSummary; LockOverlayPosition = other.LockOverlayPosition; HideWhenHearthstoneNotForeground = other.HideWhenHearthstoneNotForeground; ShowAnomalyStatus = other.ShowAnomalyStatus; ShowDamageColumn = other.ShowDamageColumn; ShowHeroColumn = other.ShowHeroColumn; ShowOverlayPreview = other.ShowOverlayPreview; StrictAnomalies = other.StrictAnomalies;
+			var source = other.Snapshot();
+			lock(_sync)
+			{
+				Enabled = source.Enabled; Layout = source.Layout; Side = source.Side; HorizontalOffset = source.HorizontalOffset; VerticalOffset = source.VerticalOffset;
+				Scale = source.Scale; Opacity = source.Opacity; BackgroundOpacity = source.BackgroundOpacity; BackgroundMode = source.BackgroundMode; VisibleRows = source.VisibleRows; UnusualExpectedPercent = source.UnusualExpectedPercent;
+				VeryUnusualExpectedPercent = source.VeryUnusualExpectedPercent; ExtremeExpectedPercent = source.ExtremeExpectedPercent; ShowMatchSummary = source.ShowMatchSummary; LockOverlayPosition = source.LockOverlayPosition; HideWhenHearthstoneNotForeground = source.HideWhenHearthstoneNotForeground; ShowAnomalyStatus = source.ShowAnomalyStatus; ShowDamageColumn = source.ShowDamageColumn; ShowHeroColumn = source.ShowHeroColumn; ShowOverlayPreview = source.ShowOverlayPreview; StrictAnomalies = source.StrictAnomalies;
+			}
 		}
 
 		public static PluginSettings Load()
@@ -78,14 +111,15 @@ namespace HistoryCombatSimulation
 			string? temporaryPath = null;
 			try
 			{
-				Normalize();
+				var snapshot = Snapshot();
+				snapshot.Normalize();
 				var path = GetPath();
 				var directory = Path.GetDirectoryName(path);
 				if(string.IsNullOrEmpty(directory))
 					return;
 				Directory.CreateDirectory(directory);
 				temporaryPath = path + ".tmp";
-				using(var stream = new FileStream(temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None)) { Serializer.Serialize(stream, this); stream.Flush(true); }
+				using(var stream = new FileStream(temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None)) { Serializer.Serialize(stream, snapshot); stream.Flush(true); }
 				if(File.Exists(path)) File.Replace(temporaryPath, path, null); else File.Move(temporaryPath, path);
 			}
 			catch(Exception ex)

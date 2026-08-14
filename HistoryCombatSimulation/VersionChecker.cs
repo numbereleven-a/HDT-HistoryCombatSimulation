@@ -67,8 +67,13 @@ namespace HistoryCombatSimulation
 			}
 		}
 
-		public static bool IsValidRepository(string value) =>
-			Regex.IsMatch(value, @"^[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,38})/[A-Za-z0-9_.-]{1,100}$", RegexOptions.CultureInvariant);
+		public static bool IsValidRepository(string value)
+		{
+			if(!Regex.IsMatch(value, @"^[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,38})/[A-Za-z0-9_.-]{1,100}$", RegexOptions.CultureInvariant))
+				return false;
+			var repository = value.Substring(value.IndexOf('/') + 1);
+			return repository.Any(character => character != '.');
+		}
 
 		private static HttpClient CreateClient() => new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
 

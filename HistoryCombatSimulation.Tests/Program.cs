@@ -16,6 +16,7 @@ internal static class Program
 	private static int Main()
 	{
 		OneRowPerCombatAndDuplicateNotifications();
+		TrackerAndSettingsSnapshotsAreThreadSafe();
 		RerunUpdatesTheSameRow();
 		StaleDataDoesNotLeak();
 		ParserAcceptsCulturesAndRejectsIncompleteValues();
@@ -119,6 +120,10 @@ internal static class Program
 		True(gate.TryConfirm(CombatOutcome.Win, changed), "two identical recovery polls confirm the result");
 		False(gate.TryConfirm(CombatOutcome.Unknown, changed), "unknown evidence resets recovery confirmation");
 		False(gate.TryConfirm(CombatOutcome.Win, changed), "confirmation starts over after an unknown poll");
+		var uncertain = new OutcomeEvidence(40, 40, 40, 28, opponentDamageObserved: true, uncertainReconnect: true, opponentDamageAmount: 12);
+		var certain = new OutcomeEvidence(40, 40, 40, 28, opponentDamageObserved: true, uncertainReconnect: false, opponentDamageAmount: 12);
+		False(gate.TryConfirm(CombatOutcome.Win, uncertain), "reconnect certainty is part of recovery evidence");
+		False(gate.TryConfirm(CombatOutcome.Win, certain), "changing reconnect certainty restarts confirmation");
 	}
 
 	private static void CaptureGateRejectsStalePartialAndErrorStates()
@@ -197,11 +202,11 @@ internal static class Program
 
 	private static void ReconnectGameStartDoesNotClearTheExistingMatch()
 	{
-		var gate = new ReconnectGameStartGate(); gate.Notify(1000);
+		var gate = new ReconnectGameStartGate(); gate.Notify();
 		Equal(GameStartDecision.Wait, gate.Resolve(false, false, 20000), "game start remains pending while HDT has not restored mode metadata");
 		Equal(GameStartDecision.ContinueExistingMatch, gate.Resolve(true, true, 21000), "a delayed reconnect marker preserves the existing match");
 		Equal(GameStartDecision.None, gate.Resolve(true, true, 22000), "the reconnect decision is consumed once");
-		gate.Notify(30000); Equal(GameStartDecision.Wait, gate.Resolve(true, false, 50000), "the decision window starts only after Solo metadata becomes available");
+		gate.Notify(); Equal(GameStartDecision.Wait, gate.Resolve(true, false, 50000), "the decision window starts only after Solo metadata becomes available");
 		Equal(GameStartDecision.Wait, gate.Resolve(true, false, 59999), "a possible reconnect keeps the existing match during the decision window");
 		Equal(GameStartDecision.StartNewMatch, gate.Resolve(true, false, 60000), "a confirmed non-reconnect starts a new match");
 	}
@@ -234,6 +239,8 @@ internal static class Program
 		var p = new SimulationProbabilities(.642, .031, .327);
 		Equal("64.2", HistoryFormatting.NormalProbability(p.Win, CultureInfo.InvariantCulture), "normal formatting");
 		Equal("64/3/33", HistoryFormatting.CompactProbabilities(p, CultureInfo.InvariantCulture), "compact formatting");
+		Equal("3/3/95", HistoryFormatting.CompactProbabilities(new SimulationProbabilities(.025, .025, .95), CultureInfo.InvariantCulture), "compact midpoint percentages round away from zero");
+		False(new SimulationProbabilities(.6, .1, .3).GetHashCode() == new SimulationProbabilities(.3, .1, .6).GetHashCode(), "probability hash preserves outcome order");
 		Equal(string.Empty, HistoryFormatting.CompactProbabilities(null, CultureInfo.InvariantCulture), "missing values remain empty");
 		Equal(string.Empty, HistoryFormatting.AnomalyMarker(AnomalySeverity.None), "ordinary outcome has no marker"); Equal("!", HistoryFormatting.AnomalyMarker(AnomalySeverity.Unusual), "visible unusual marker"); Equal("!!", HistoryFormatting.AnomalyMarker(AnomalySeverity.VeryUnusual), "visible very unusual marker"); Equal("!!!", HistoryFormatting.AnomalyMarker(AnomalySeverity.Extreme), "visible extreme marker");
 		Equal("12", HistoryFormatting.CombatDamage(12, CultureInfo.InvariantCulture), "dealt damage uses an unsigned number"); Equal("8", HistoryFormatting.CombatDamage(-8, CultureInfo.InvariantCulture), "received damage uses an unsigned number"); Equal("0", HistoryFormatting.CombatDamage(0, CultureInfo.InvariantCulture), "tie damage is zero"); Equal(string.Empty, HistoryFormatting.CombatDamage(null, CultureInfo.InvariantCulture), "missing damage remains empty");
@@ -282,16 +289,72 @@ internal static class Program
 		Near(25, OverlayPositionPolicy.HorizontalOffsetFromLeft(OverlaySide.Left, 1920, 300, 25), "left placement stores the left coordinate");
 		Near(100, OverlayPositionPolicy.HorizontalOffsetFromLeft(OverlaySide.Right, 1920, 300, 1520), "right placement derives its offset from the preserved left coordinate");
 		Near(200, OverlayPositionPolicy.HorizontalOffsetFromLeft(OverlaySide.Right, 1920, 200, 1520), "changing overlay width keeps the same left coordinate by changing the right offset");
+		True(OverlayPositionPolicy.PreserveExpandedWidthWhenCollapsed(HistoryLayout.Normal), "normal collapsed overlay keeps its expanded table width");
+		False(OverlayPositionPolicy.PreserveExpandedWidthWhenCollapsed(HistoryLayout.Compact), "compact collapsed overlay shrinks to its header width");
+		var normal = OverlayLayoutMetrics.For(HistoryLayout.Normal); var compact = OverlayLayoutMetrics.For(HistoryLayout.Compact);
+		True(compact.TitleFontSize < normal.TitleFontSize, "compact title text is smaller");
+		True(compact.RowFontSize < normal.RowFontSize, "compact row text is smaller");
+		True(compact.RowHeight < normal.RowHeight, "compact rows are shorter");
+		True(compact.CollapseWidth < normal.CollapseWidth, "compact collapse button is narrower");
+		True(compact.CollapseHeight < normal.CollapseHeight, "compact header strip and collapse button are shorter");
+		Near(176, compact.CompactExpandedWidth(showHero: true, showDamage: true), "compact expanded width is calculated from every visible column");
+		Near(148, compact.CompactExpandedWidth(showHero: true, showDamage: false), "compact expanded width excludes the hidden damage column");
+		Near(20, compact.CompactCollapsedWidth, "compact collapsed width is calculated without relying on delayed WPF measurement");
+		Near(256, OverlayPositionPolicy.CompactLeftAfterToggle(100, 176, 20, 1, collapsing: true), "compact collapse keeps the button at its expanded right edge");
+		Near(100, OverlayPositionPolicy.CompactLeftAfterToggle(256, 176, 20, 1, collapsing: false), "compact expansion restores the original table position");
+		Near(412, OverlayPositionPolicy.CompactLeftAfterToggle(100, 176, 20, 2, collapsing: true), "compact collapse movement accounts for overlay scale");
+		True(compact.TurnWidth + compact.HeroWidth + compact.ProbabilityWidth + compact.DamageWidth + compact.ResultWidth < normal.TurnWidth + normal.HeroWidth + normal.ProbabilityWidth * 3 + normal.DamageWidth + normal.ResultWidth, "compact table is narrower");
+	}
+
+	private static void TrackerAndSettingsSnapshotsAreThreadSafe()
+	{
+		var tracker = new CombatHistoryTracker();
+		Exception? trackerFailure = null;
+		var writer = Task.Run(() =>
+		{
+			try { for(var turn = 1; turn <= 300; turn++) tracker.BeginCombat(Snapshot(turn, turn + 1)); }
+			catch(Exception ex) { trackerFailure = ex; }
+		});
+		var reader = Task.Run(() =>
+		{
+			try { for(var index = 0; index < 1000; index++) tracker.SnapshotRows(); }
+			catch(Exception ex) { trackerFailure = ex; }
+		});
+		Task.WaitAll(writer, reader);
+		True(trackerFailure == null, "history snapshots remain safe while combats are added");
+
+		var settings = new PluginSettings(); settings.SetPosition(0, 0);
+		Exception? settingsFailure = null;
+		var positionWriter = Task.Run(() =>
+		{
+			try { for(var index = 0; index < 1000; index++) settings.SetPosition(index, -index); }
+			catch(Exception ex) { settingsFailure = ex; }
+		});
+		var positionReader = Task.Run(() =>
+		{
+			try
+			{
+				for(var index = 0; index < 1000; index++)
+				{
+					var snapshot = settings.Snapshot();
+					if(snapshot.VerticalOffset != -snapshot.HorizontalOffset) throw new InvalidOperationException("torn position snapshot");
+				}
+			}
+			catch(Exception ex) { settingsFailure = ex; }
+		});
+		Task.WaitAll(positionWriter, positionReader);
+		True(settingsFailure == null, "position snapshots are atomic while the overlay is dragged");
 	}
 
 	private static void VersionAndMovementDefaultsAreStable()
 	{
-		Equal("1.3.1", PluginVersion.Display, "short displayed version"); Equal("1.3.1", PluginVersion.LocalRelease, "stable release label"); Equal("1.3.1", PluginVersion.Hdt.ToString(), "HDT version has no trailing zeroes");
+		Equal("1.4", PluginVersion.Display, "short displayed version"); Equal("1.4", PluginVersion.LocalRelease, "stable release label"); Equal("1.4", PluginVersion.Hdt.ToString(), "HDT version has no trailing zeroes");
 		Equal(PluginVersion.LocalRelease, typeof(PluginVersion).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion, "assembly informational version matches local release label");
 		var settings = new PluginSettings(); True(settings.LockOverlayPosition, "overlay movement is locked by default"); True(settings.ShowAnomalyStatus, "anomaly status is shown by default");
 		False(settings.ShowDamageColumn, "combat damage column is hidden by default"); True(settings.ShowHeroColumn, "hero column is shown by default");
 		True(settings.StrictAnomalies, "strict anomaly mode is enabled by default");
 		Near(14, settings.HorizontalOffset, "default horizontal offset matches the release layout"); Near(155, settings.VerticalOffset, "default vertical offset matches the release layout");
+		settings.HorizontalOffset = 4000; settings.VerticalOffset = -3000; settings.Normalize(); Near(4000, settings.HorizontalOffset, "dragging far across a wide or multi-monitor desktop keeps the horizontal position"); Near(-3000, settings.VerticalOffset, "dragging far across a tall or multi-monitor desktop keeps the vertical position");
 		Near(1, settings.Opacity, "overlay is fully opaque by default"); Near(1, settings.BackgroundOpacity, "background is fully opaque by default"); Equal(OverlayBackgroundMode.Full, settings.BackgroundMode, "full background is the default");
 		False(settings.ShowMatchSummary, "expected-versus-actual summary is hidden by default"); False(settings.ShowOverlayPreview, "overlay preview is hidden by default");
 		using(var reader = new StringReader("<PluginSettings><ShowCombatDamageColumn>true</ShowCombatDamageColumn></PluginSettings>"))
@@ -301,7 +364,7 @@ internal static class Program
 		Near(51, settings.UnusualExpectedPercent, "light anomaly expected-result threshold"); Near(80, settings.VeryUnusualExpectedPercent, "strong anomaly expected-result threshold"); Near(95, settings.ExtremeExpectedPercent, "extreme anomaly expected-result threshold");
 		False(settings.HideWhenHearthstoneNotForeground, "focus hiding is disabled by default");
 		var copy = new PluginSettings { LockOverlayPosition = false, HideWhenHearthstoneNotForeground = false, ShowOverlayPreview = true, BackgroundOpacity = .35, BackgroundMode = OverlayBackgroundMode.Header }; settings.CopyFrom(copy); False(settings.LockOverlayPosition, "movement lock is copied with visual settings"); False(settings.HideWhenHearthstoneNotForeground, "focus behavior is copied with visual settings"); True(settings.ShowOverlayPreview, "preview behavior is copied with settings"); Near(.35, settings.BackgroundOpacity, "background opacity is copied"); Equal(OverlayBackgroundMode.Header, settings.BackgroundMode, "background mode is copied");
-		var bounds = new PluginSettings { HorizontalOffset = 900, UnusualExpectedPercent = 50, VeryUnusualExpectedPercent = 100 }; bounds.Normalize(); Near(500, bounds.HorizontalOffset, "finite visual values saturate at the nearest boundary"); Near(51, bounds.UnusualExpectedPercent, "the light anomaly threshold cannot be set to an ineffective 50 percent"); Near(99, bounds.VeryUnusualExpectedPercent, "the strong anomaly threshold maximum does not jump back to its default");
+		var bounds = new PluginSettings { HorizontalOffset = 20000, UnusualExpectedPercent = 50, VeryUnusualExpectedPercent = 100 }; bounds.Normalize(); Near(PluginSettings.MaximumPositionOffset, bounds.HorizontalOffset, "finite visual values saturate at the nearest boundary"); Near(51, bounds.UnusualExpectedPercent, "the light anomaly threshold cannot be set to an ineffective 50 percent"); Near(99, bounds.VeryUnusualExpectedPercent, "the strong anomaly threshold maximum does not jump back to its default");
 		var invalid = new PluginSettings { Scale = double.NaN, BackgroundOpacity = double.PositiveInfinity }; invalid.Normalize(); Near(1, invalid.Scale, "non-finite settings use a safe fallback"); Near(1, invalid.BackgroundOpacity, "non-finite background opacity uses a safe fallback");
 		Throws<ArgumentOutOfRangeException>(() => new SimulationProbabilities(double.NaN, 0, 1), "probability model rejects NaN");
 		Throws<ArgumentOutOfRangeException>(() => new SimulationProbabilities(.8, .8, 0), "probability model rejects an invalid total");
@@ -318,7 +381,7 @@ internal static class Program
 				var owner = new Window();
 				application.MainWindow = owner;
 
-				var settingsWindow = new SettingsWindow(new PluginSettings(), () => { }, PluginVersion.Hdt);
+				var settingsWindow = new SettingsWindow(new PluginSettings(), _ => { }, PluginVersion.Hdt);
 				Equal(WindowStartupLocation.CenterScreen, settingsWindow.WindowStartupLocation, "settings use the screen when the owner handle is unavailable");
 				settingsWindow.Close(); owner.Close(); application.Shutdown();
 			}
@@ -339,6 +402,9 @@ internal static class Program
 		False(ReleaseVersion.TryParse("release-2.8", out _), "unsupported tag text is rejected");
 		True(VersionChecker.IsValidRepository("numbereleven-a/HDT-HistoryCombatSimulation"), "configured owner and repository are accepted");
 		False(VersionChecker.IsValidRepository("api.github.com/repos/owner/repo"), "repository override cannot replace the API host");
+		False(VersionChecker.IsValidRepository("owner/."), "single-dot repository names are rejected");
+		False(VersionChecker.IsValidRepository("owner/.."), "repository path traversal segments are rejected");
+		False(VersionChecker.IsValidRepository("owner/..."), "repository names made only of dots are rejected");
 
 		var handler = new UpdateHandler();
 		var oldRepository = Environment.GetEnvironmentVariable("HDT_HISTORYCOMBATSIMULATION_UPDATE_REPOSITORY");

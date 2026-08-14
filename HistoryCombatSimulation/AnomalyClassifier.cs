@@ -50,9 +50,9 @@ namespace HistoryCombatSimulation
 				materialized.Count(x => x.Outcome == CombatOutcome.Win),
 				materialized.Count(x => x.Outcome == CombatOutcome.Tie),
 				materialized.Count(x => x.Outcome == CombatOutcome.Loss),
-				materialized.Where(x => x.Probabilities != null).Sum(x => x.Probabilities!.Win),
-				materialized.Where(x => x.Probabilities != null).Sum(x => x.Probabilities!.Tie),
-				materialized.Where(x => x.Probabilities != null).Sum(x => x.Probabilities!.Loss));
+				materialized.Sum(x => x.Probabilities!.Win),
+				materialized.Sum(x => x.Probabilities!.Tie),
+				materialized.Sum(x => x.Probabilities!.Loss));
 		}
 	}
 

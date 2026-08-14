@@ -19,6 +19,7 @@ namespace HistoryCombatSimulation
 		private readonly Canvas _layer = new Canvas { Visibility = Visibility.Collapsed };
 		private readonly SolidColorBrush _background = new SolidColorBrush(Color.FromArgb(224, 18, 20, 23));
 		private readonly SolidColorBrush _headerBackground = new SolidColorBrush(Colors.Transparent);
+		private readonly ScaleTransform _scaleTransform = new ScaleTransform(1, 1);
 		private readonly Border _visual;
 		private readonly StackPanel _content = new StackPanel();
 		private readonly Border _header = new Border { CornerRadius = new CornerRadius(3) };
@@ -29,7 +30,7 @@ namespace HistoryCombatSimulation
 		private readonly TextBlock _older = Text(string.Empty, 10, FontWeights.Normal);
 		private readonly StackPanel _rows = new StackPanel();
 		private readonly ScrollBar _scroll = new ScrollBar { Orientation = Orientation.Vertical, Width = 8, Minimum = 0, SmallChange = 1, LargeChange = 5, Visibility = Visibility.Collapsed };
-		private readonly Dictionary<CombatRow, RowVisual> _rowVisuals = new Dictionary<CombatRow, RowVisual>();
+		private readonly Dictionary<long, RowVisual> _rowVisuals = new Dictionary<long, RowVisual>();
 		private HistoryLayout? _layout;
 		private bool? _showDamageColumn;
 		private bool? _showHeroColumn;
@@ -46,12 +47,14 @@ namespace HistoryCombatSimulation
 		private double _dragLeft;
 		private double _dragTop;
 		private bool _collapsed;
+		private double _normalExpandedWidth = double.NaN;
+		private double _compactCollapsedLeft = double.NaN;
 		private bool _hasAppliedPosition;
 		private OverlaySide _appliedSide;
 		private double _appliedHorizontalOffset;
 		private double _appliedVerticalOffset;
 		private double _appliedCanvasWidth = double.NaN;
-		public event EventHandler? PositionChanged;
+		public event EventHandler<OverlayPositionChangedEventArgs>? PositionChanged;
 
 		public HistoryOverlay()
 		{
@@ -134,19 +137,21 @@ namespace HistoryCombatSimulation
 			}
 			var displayRows = preview ? _previewRows : rows;
 			settings.Normalize(); _lastRows = displayRows; _lastSettings = settings;
+			ApplyLayoutDensity(settings.Layout);
 			_title.ToolTip = settings.StrictAnomalies ? "Strict anomalies: one unique most likely result did not happen. ! for any miss, !! from 80%, !!! from 95%. Equal highest chances are not marked." : "Anomaly markers appear when the most likely result did not happen: ! above the configured light threshold, !! above the strong threshold, !!! above the extreme threshold.";
 			if(preview)
 				foreach(var row in displayRows) row.Anomaly = AnomalyClassifier.Classify(row.Outcome, row.Probabilities, settings.GetThresholds(), settings.StrictAnomalies);
-			var containsStaleRows = _rowVisuals.Keys.Any(existing => !displayRows.Contains(existing));
+			var currentRowIdentities = new HashSet<long>(displayRows.Select(row => row.Identity));
+			var containsStaleRows = _rowVisuals.Keys.Any(existing => !currentRowIdentities.Contains(existing));
 			if(_layout != settings.Layout || _showDamageColumn != settings.ShowDamageColumn || _showHeroColumn != settings.ShowHeroColumn || containsStaleRows)
 			{
 				_layout = settings.Layout; _showDamageColumn = settings.ShowDamageColumn; _showHeroColumn = settings.ShowHeroColumn; _rows.Children.Clear(); _rowVisuals.Clear(); ConfigureColumnHeader(settings.Layout, settings.ShowHeroColumn, settings.ShowDamageColumn);
 			}
 			foreach(var row in displayRows)
 			{
-				if(!_rowVisuals.TryGetValue(row, out var visual))
+				if(!_rowVisuals.TryGetValue(row.Identity, out var visual))
 				{
-					visual = new RowVisual(settings.Layout, settings.ShowHeroColumn, settings.ShowDamageColumn); _rowVisuals.Add(row, visual); _rows.Children.Add(visual.Grid);
+					visual = new RowVisual(settings.Layout, settings.ShowHeroColumn, settings.ShowDamageColumn); _rowVisuals.Add(row.Identity, visual); _rows.Children.Add(visual.Grid);
 				}
 				visual.Update(row, settings);
 			}
@@ -161,13 +166,24 @@ namespace HistoryCombatSimulation
 			_changingScroll = true; _scroll.Maximum = Math.Max(0, displayRows.Count - settings.VisibleRows); _scroll.ViewportSize = settings.VisibleRows;
 			if(HistoryViewportPolicy.ShouldScrollToNewest(_lastRowCount, displayRows.Count, _visibleRows, settings.VisibleRows, wasAtNewest)) _scroll.Value = _scroll.Maximum;
 			_scroll.Visibility = displayRows.Count > settings.VisibleRows ? Visibility.Visible : Visibility.Collapsed; _changingScroll = false;
-			_lastRowCount = displayRows.Count; _visibleRows = settings.VisibleRows; RenderViewport(displayRows, settings);
+			_lastRowCount = displayRows.Count; _visibleRows = settings.VisibleRows;
+			ApplyCollapsedWidth(settings);
+			RenderViewport(displayRows, settings);
+			if(!_collapsed && settings.Layout == HistoryLayout.Normal)
+				_normalExpandedWidth = _visual.DesiredSize.Width;
 			if(!positionInputChanged && canvasWidthUnchanged && IsFinite(previousLeft))
 				PreserveTopLeft(settings, previousLeft, previousTop);
 			else
 				Position(settings);
+			if(_collapsed && settings.Layout == HistoryLayout.Compact)
+			{
+				if(positionInputChanged || !IsFinite(_compactCollapsedLeft))
+					_compactCollapsedLeft = Canvas.GetLeft(_layer);
+				else
+					Canvas.SetLeft(_layer, _compactCollapsedLeft);
+			}
 			RememberAppliedPosition(settings);
-			ApplyInteraction(settings); ApplyBackground(settings); _layer.Opacity = settings.Opacity; _layer.RenderTransform = new ScaleTransform(settings.Scale, settings.Scale); _layer.Visibility = Visibility.Visible;
+			ApplyInteraction(settings); ApplyBackground(settings); _layer.Opacity = settings.Opacity; _scaleTransform.ScaleX = settings.Scale; _scaleTransform.ScaleY = settings.Scale; _layer.RenderTransform = _scaleTransform; _layer.Visibility = Visibility.Visible;
 		}
 
 		private void ApplyBackground(PluginSettings settings)
@@ -175,6 +191,22 @@ namespace HistoryCombatSimulation
 			var opacity = (byte)Math.Round(settings.BackgroundOpacity * 255);
 			_background.Color = Color.FromArgb(settings.BackgroundMode == OverlayBackgroundMode.Full ? opacity : (byte)0, 18, 20, 23);
 			_headerBackground.Color = Color.FromArgb(settings.BackgroundMode == OverlayBackgroundMode.Header ? opacity : (byte)0, 18, 20, 23);
+		}
+
+		private void ApplyLayoutDensity(HistoryLayout layout)
+		{
+			var metrics = OverlayLayoutMetrics.For(layout);
+			var compact = layout == HistoryLayout.Compact;
+			_visual.Padding = compact ? new Thickness(metrics.Padding, 1, metrics.Padding, metrics.Padding) : new Thickness(metrics.Padding);
+			_title.FontSize = metrics.TitleFontSize;
+			_title.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+			_collapse.Width = metrics.CollapseWidth;
+			_collapse.Height = metrics.CollapseHeight;
+			_collapse.FontSize = compact ? 8 : 12;
+			_collapse.Margin = new Thickness(compact ? 0 : 5, 0, 0, 0);
+			_header.Height = compact ? metrics.CollapseHeight : double.NaN;
+			_columns.Height = metrics.HeaderHeight;
+			_older.FontSize = layout == HistoryLayout.Compact ? 9 : 10;
 		}
 
 		private void PreserveTopLeft(PluginSettings settings, double left, double top)
@@ -205,7 +237,7 @@ namespace HistoryCombatSimulation
 			var start = Math.Max(0, Math.Min((int)Math.Round(_scroll.Value), Math.Max(0, rows.Count - settings.VisibleRows)));
 			var end = Math.Min(rows.Count, start + settings.VisibleRows);
 			for(var i = 0; i < rows.Count; i++)
-				if(_rowVisuals.TryGetValue(rows[i], out var visual))
+				if(_rowVisuals.TryGetValue(rows[i].Identity, out var visual))
 					visual.Grid.Visibility = i >= start && i < end ? Visibility.Visible : Visibility.Collapsed;
 			var newer = rows.Count - end;
 			_older.Visibility = start > 0 || newer > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -250,10 +282,58 @@ namespace HistoryCombatSimulation
 
 		private void ToggleCollapsed()
 		{
-			if(!_collapsed) { _visual.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity)); _visual.Width = _visual.DesiredSize.Width; _collapsed = true; }
+			var left = Canvas.GetLeft(_layer);
+			var top = Canvas.GetTop(_layer);
+			_visual.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+			var compact = _lastSettings?.Layout == HistoryLayout.Compact;
+			var expandingCompact = _collapsed && compact;
+			var compactTargetLeft = left;
+			if(compact && _lastSettings != null && IsFinite(left))
+			{
+				var metrics = OverlayLayoutMetrics.For(HistoryLayout.Compact);
+				compactTargetLeft = OverlayPositionPolicy.CompactLeftAfterToggle(
+					left,
+					metrics.CompactExpandedWidth(_lastSettings.ShowHeroColumn, _lastSettings.ShowDamageColumn),
+					metrics.CompactCollapsedWidth,
+					_lastSettings.Scale,
+					collapsing: !_collapsed);
+			}
+			if(!_collapsed)
+			{
+				if(_lastSettings?.Layout == HistoryLayout.Normal)
+					_normalExpandedWidth = _visual.DesiredSize.Width;
+				else if(compact && IsFinite(compactTargetLeft))
+					_compactCollapsedLeft = compactTargetLeft;
+				_collapsed = true;
+				ApplyCollapsedWidth(_lastSettings);
+			}
 			else { _collapsed = false; _visual.Width = double.NaN; }
 			_collapse.Content = _collapsed ? "+" : "−"; _collapse.ToolTip = _collapsed ? "Expand" : "Collapse";
-			if(_lastSettings != null && _lastRows.Count > 0) { RenderViewport(_lastRows, _lastSettings); Position(_lastSettings); }
+			if(_lastSettings != null && _lastRows.Count > 0)
+			{
+				RenderViewport(_lastRows, _lastSettings);
+				if(expandingCompact && IsFinite(compactTargetLeft))
+					Canvas.SetLeft(_layer, compactTargetLeft);
+				else if(compact && IsFinite(_compactCollapsedLeft))
+					Canvas.SetLeft(_layer, _compactCollapsedLeft);
+				else if(IsFinite(left))
+					Canvas.SetLeft(_layer, left);
+				else Position(_lastSettings);
+				if(IsFinite(top)) Canvas.SetTop(_layer, top);
+			}
+			if(expandingCompact)
+				_compactCollapsedLeft = double.NaN;
+		}
+
+		private void ApplyCollapsedWidth(PluginSettings? settings)
+		{
+			if(!_collapsed || settings == null || !OverlayPositionPolicy.PreserveExpandedWidthWhenCollapsed(settings.Layout))
+			{
+				_visual.Width = double.NaN;
+				return;
+			}
+			if(!double.IsNaN(_normalExpandedWidth) && !double.IsInfinity(_normalExpandedWidth))
+				_visual.Width = _normalExpandedWidth;
 		}
 
 		private void ApplyCollapsedVisibility(PluginSettings settings)
@@ -270,38 +350,49 @@ namespace HistoryCombatSimulation
 			if(!_dragging || _lastSettings == null || canvas == null || e.LeftButton != MouseButtonState.Pressed)
 				return;
 			var current = e.GetPosition(canvas); var left = _dragLeft + current.X - _dragStart.X; var top = _dragTop + current.Y - _dragStart.Y;
-			Canvas.SetLeft(_layer, left); Canvas.SetTop(_layer, top); _lastSettings.VerticalOffset = top;
-			var scaledWidth = _layer.Width * _lastSettings.Scale; _lastSettings.HorizontalOffset = OverlayPositionPolicy.HorizontalOffsetFromLeft(_lastSettings.Side, canvas.ActualWidth, scaledWidth, left);
+			Canvas.SetLeft(_layer, left); Canvas.SetTop(_layer, top);
+			if(_collapsed && _lastSettings.Layout == HistoryLayout.Compact)
+				_compactCollapsedLeft = left;
+			var scaledWidth = _layer.Width * _lastSettings.Scale;
+			var horizontalOffset = OverlayPositionPolicy.HorizontalOffsetFromLeft(_lastSettings.Side, canvas.ActualWidth, scaledWidth, left);
+			_lastSettings.SetPosition(horizontalOffset, top);
 			e.Handled = true;
 		}
 
 		private void EndDrag(object sender, MouseButtonEventArgs e)
 		{
-			if(!_dragging) return; _dragging = false; _visual.ReleaseMouseCapture(); _lastSettings?.Normalize(); PositionChanged?.Invoke(this, EventArgs.Empty); e.Handled = true;
+			if(!_dragging) return;
+			_dragging = false;
+			_visual.ReleaseMouseCapture();
+			_lastSettings?.Normalize();
+			if(_lastSettings != null)
+				PositionChanged?.Invoke(this, new OverlayPositionChangedEventArgs(_lastSettings.HorizontalOffset, _lastSettings.VerticalOffset));
+			e.Handled = true;
 		}
 
 		private void ConfigureColumnHeader(HistoryLayout layout, bool showHero, bool showDamage)
 		{
 			_columns.Children.Clear(); _columns.ColumnDefinitions.Clear();
-			var column = 0; AddHeaderColumn("#", layout == HistoryLayout.Normal ? 24 : 22, column++);
-			if(showHero) AddHeaderColumn("HERO", layout == HistoryLayout.Normal ? 38 : 30, column++);
+			var metrics = OverlayLayoutMetrics.For(layout);
+			var column = 0; AddHeaderColumn("#", metrics.TurnWidth, column++, metrics.HeaderFontSize);
+			if(showHero) AddHeaderColumn("HERO", metrics.HeroWidth, column++, metrics.HeaderFontSize);
 			if(layout == HistoryLayout.Normal)
 			{
-				AddHeaderColumn("WIN", 42, column++); AddHeaderColumn("TIE", 42, column++); AddHeaderColumn("LOSS", 42, column++);
+				AddHeaderColumn("WIN", metrics.ProbabilityWidth, column++, metrics.HeaderFontSize); AddHeaderColumn("TIE", metrics.ProbabilityWidth, column++, metrics.HeaderFontSize); AddHeaderColumn("LOSS", metrics.ProbabilityWidth, column++, metrics.HeaderFontSize);
 			}
-			else AddHeaderColumn("W/T/L", 76, column++);
-			if(showDamage) AddHeaderColumn("DMG", 40, column++);
-			AddHeaderColumn("RESULT", layout == HistoryLayout.Normal ? 62 : 54, column);
+			else AddHeaderColumn("W/T/L", metrics.ProbabilityWidth, column++, metrics.HeaderFontSize);
+			if(showDamage) AddHeaderColumn("DMG", metrics.DamageWidth, column++, metrics.HeaderFontSize);
+			AddHeaderColumn("RESULT", metrics.ResultWidth, column, metrics.HeaderFontSize);
 		}
 
-		private void AddHeaderColumn(string value, double width, int column)
+		private void AddHeaderColumn(string value, double width, int column, double fontSize)
 		{
-			_columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(width) }); AddHeader(value, column);
+			_columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(width) }); AddHeader(value, column, fontSize);
 		}
 
-		private void AddHeader(string value, int column)
+		private void AddHeader(string value, int column, double fontSize)
 		{
-			var label = Text(value, 9, FontWeights.Bold); label.TextAlignment = TextAlignment.Center; label.VerticalAlignment = VerticalAlignment.Center; System.Windows.Controls.Grid.SetColumn(label, column); _columns.Children.Add(label);
+			var label = Text(value, fontSize, FontWeights.Bold); label.TextAlignment = TextAlignment.Center; label.VerticalAlignment = VerticalAlignment.Center; System.Windows.Controls.Grid.SetColumn(label, column); _columns.Children.Add(label);
 		}
 
 		private static TextBlock Text(string text, double size, FontWeight weight) => new TextBlock { Text = text, Foreground = Brushes.White, FontFamily = new FontFamily("Segoe UI"), FontSize = size, FontWeight = weight };
@@ -323,26 +414,28 @@ namespace HistoryCombatSimulation
 
 		private sealed class RowVisual
 		{
+			private static bool _portraitFailureLogged;
 			public RowVisual(HistoryLayout layout, bool showHero, bool showDamage)
 			{
-				Layout = layout; ShowHero = showHero; Grid = new Grid { Height = layout == HistoryLayout.Compact ? 24 : 31, Margin = new Thickness(0, 1, 0, 0) };
-				var column = 0; AddColumn(layout == HistoryLayout.Normal ? 24 : 22); Turn = AddText(column++);
-				PortraitImage = new Image { Stretch = Stretch.Uniform }; Portrait = new Border { Width = layout == HistoryLayout.Compact ? 23 : 29, Height = layout == HistoryLayout.Compact ? 23 : 29, CornerRadius = new CornerRadius(3), BorderBrush = Brushes.DimGray, BorderThickness = new Thickness(1), ClipToBounds = true, Child = PortraitImage };
-				GhostMarker = Text("\u2620", layout == HistoryLayout.Compact ? 9 : 10, FontWeights.Bold); GhostMarker.Foreground = Brushes.White; GhostMarker.Background = Brushes.Black; GhostMarker.HorizontalAlignment = HorizontalAlignment.Right; GhostMarker.VerticalAlignment = VerticalAlignment.Bottom; GhostMarker.Visibility = Visibility.Collapsed;
+				var metrics = OverlayLayoutMetrics.For(layout);
+				Layout = layout; ShowHero = showHero; Grid = new Grid { Height = metrics.RowHeight, Margin = new Thickness(0, 1, 0, 0) };
+				var column = 0; AddColumn(metrics.TurnWidth); Turn = AddText(column++);
+				PortraitImage = new Image { Stretch = Stretch.Uniform }; Portrait = new Border { Width = metrics.PortraitSize, Height = metrics.PortraitSize, CornerRadius = new CornerRadius(layout == HistoryLayout.Compact ? 2 : 3), BorderBrush = Brushes.DimGray, BorderThickness = new Thickness(1), ClipToBounds = true, Child = PortraitImage };
+				GhostMarker = Text("\u2620", metrics.AnomalyFontSize, FontWeights.Bold); GhostMarker.Foreground = Brushes.White; GhostMarker.Background = Brushes.Black; GhostMarker.HorizontalAlignment = HorizontalAlignment.Right; GhostMarker.VerticalAlignment = VerticalAlignment.Bottom; GhostMarker.Visibility = Visibility.Collapsed;
 				if(showHero)
 				{
-					AddColumn(layout == HistoryLayout.Normal ? 38 : 30); var portraitCell = new Grid(); portraitCell.Children.Add(Portrait); portraitCell.Children.Add(GhostMarker); System.Windows.Controls.Grid.SetColumn(portraitCell, column++); Grid.Children.Add(portraitCell);
+					AddColumn(metrics.HeroWidth); var portraitCell = new Grid(); portraitCell.Children.Add(Portrait); portraitCell.Children.Add(GhostMarker); System.Windows.Controls.Grid.SetColumn(portraitCell, column++); Grid.Children.Add(portraitCell);
 				}
 				if(layout == HistoryLayout.Normal)
 				{
-					AddColumn(42); Win = AddText(column++); AddColumn(42); Tie = AddText(column++); AddColumn(42); Loss = AddText(column++);
+					AddColumn(metrics.ProbabilityWidth); Win = AddText(column++); AddColumn(metrics.ProbabilityWidth); Tie = AddText(column++); AddColumn(metrics.ProbabilityWidth); Loss = AddText(column++);
 				}
-				else { AddColumn(76); Compact = AddText(column++); }
-				if(showDamage) { AddColumn(40); Damage = AddText(column++); }
-				AddColumn(layout == HistoryLayout.Normal ? 62 : 54); var resultColumn = column;
+				else { AddColumn(metrics.ProbabilityWidth); Compact = AddText(column++); }
+				if(showDamage) { AddColumn(metrics.DamageWidth); Damage = AddText(column++); }
+				AddColumn(metrics.ResultWidth); var resultColumn = column;
 				var result = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-				Outcome = Text(string.Empty, layout == HistoryLayout.Compact ? 11 : 12, FontWeights.SemiBold); Outcome.VerticalAlignment = VerticalAlignment.Center; result.Children.Add(Outcome);
-				AnomalyText = Text(string.Empty, layout == HistoryLayout.Compact ? 9 : 10, FontWeights.Bold); AnomalyBadge = new Border { CornerRadius = new CornerRadius(3), Padding = new Thickness(3, 0, 3, 1), Margin = new Thickness(4, 0, 0, 0), BorderThickness = new Thickness(1), Child = AnomalyText, Visibility = Visibility.Collapsed }; result.Children.Add(AnomalyBadge);
+				Outcome = Text(string.Empty, metrics.OutcomeFontSize, FontWeights.SemiBold); Outcome.VerticalAlignment = VerticalAlignment.Center; result.Children.Add(Outcome);
+				AnomalyText = Text(string.Empty, metrics.AnomalyFontSize, FontWeights.Bold); AnomalyBadge = new Border { CornerRadius = new CornerRadius(3), Padding = new Thickness(layout == HistoryLayout.Compact ? 2 : 3, 0, layout == HistoryLayout.Compact ? 2 : 3, 1), Margin = new Thickness(layout == HistoryLayout.Compact ? 2 : 4, 0, 0, 0), BorderThickness = new Thickness(1), Child = AnomalyText, Visibility = Visibility.Collapsed }; result.Children.Add(AnomalyBadge);
 				System.Windows.Controls.Grid.SetColumn(result, resultColumn); Grid.Children.Add(result);
 			}
 
@@ -407,7 +500,11 @@ namespace HistoryCombatSimulation
 					PortraitImage.Source = portrait; PortraitImage.Stretch = preferred != null ? Stretch.Uniform : Stretch.UniformToFill; Portrait.Background = portrait != null ? Brushes.Black : card.Background; _usingPreferredPortrait = preferred != null;
 					if(preferred == null) RequestMissingPortrait(card);
 				}
-				catch { PortraitImage.Source = null; Portrait.Background = card.Background; _usingPreferredPortrait = false; }
+				catch(Exception ex)
+				{
+					PortraitImage.Source = null; Portrait.Background = card.Background; _usingPreferredPortrait = false;
+					LogPortraitFailureOnce(ex);
+				}
 			}
 
 			private async void RequestMissingPortrait(Card card)
@@ -420,12 +517,31 @@ namespace HistoryCombatSimulation
 					if(requestId != _portraitRequestId || !ReferenceEquals(card, _loadedHeroCard) || portrait == null) return;
 					PortraitImage.Source = portrait; PortraitImage.Stretch = Stretch.Uniform; Portrait.Background = Brushes.Black; _usingPreferredPortrait = true;
 				}
-				catch { }
+				catch(Exception ex) { LogPortraitFailureOnce(ex); }
 				finally { if(requestId == _portraitRequestId) _portraitDownloadInFlight = false; }
 			}
 
+			private static void LogPortraitFailureOnce(Exception exception)
+			{
+				if(_portraitFailureLogged) return;
+				_portraitFailureLogged = true;
+				PluginLog.Warn("hero portrait could not be loaded", exception);
+			}
+
 			private void AddColumn(double width) => Grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(width) });
-			private TextBlock AddText(int column) { var text = Text(string.Empty, Layout == HistoryLayout.Compact ? 11 : 12, FontWeights.SemiBold); text.TextAlignment = TextAlignment.Center; text.VerticalAlignment = VerticalAlignment.Center; System.Windows.Controls.Grid.SetColumn(text, column); Grid.Children.Add(text); return text; }
+			private TextBlock AddText(int column) { var text = Text(string.Empty, OverlayLayoutMetrics.For(Layout).RowFontSize, FontWeights.SemiBold); text.TextAlignment = TextAlignment.Center; text.VerticalAlignment = VerticalAlignment.Center; System.Windows.Controls.Grid.SetColumn(text, column); Grid.Children.Add(text); return text; }
 		}
+	}
+
+	public sealed class OverlayPositionChangedEventArgs : EventArgs
+	{
+		public OverlayPositionChangedEventArgs(double horizontalOffset, double verticalOffset)
+		{
+			HorizontalOffset = horizontalOffset;
+			VerticalOffset = verticalOffset;
+		}
+
+		public double HorizontalOffset { get; }
+		public double VerticalOffset { get; }
 	}
 }
