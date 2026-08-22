@@ -259,6 +259,18 @@ namespace HistoryCombatSimulation
 			_visual.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
 			var scaledWidth = (_visual.DesiredSize.Width + (_scroll.Visibility == Visibility.Visible ? 10 : 0)) * settings.Scale;
 			var left = settings.Side == OverlaySide.Left ? settings.HorizontalOffset : width - scaledWidth - settings.HorizontalOffset;
+			if(_collapsed && settings.Layout == HistoryLayout.Compact)
+			{
+				var metrics = OverlayLayoutMetrics.For(HistoryLayout.Compact);
+				left = OverlayPositionPolicy.CompactCollapsedLeftFromHorizontalOffset(
+					settings.Side,
+					width,
+					CompactExpandedWidth(settings),
+					CompactExpandedExtraWidth(settings, _lastRows.Count),
+					metrics.CompactCollapsedWidth,
+					settings.Scale,
+					settings.HorizontalOffset);
+			}
 			Canvas.SetLeft(_layer, left); Canvas.SetTop(_layer, settings.VerticalOffset);
 		}
 
@@ -293,7 +305,7 @@ namespace HistoryCombatSimulation
 				var metrics = OverlayLayoutMetrics.For(HistoryLayout.Compact);
 				compactTargetLeft = OverlayPositionPolicy.CompactLeftAfterToggle(
 					left,
-					metrics.CompactExpandedWidth(_lastSettings.ShowHeroColumn, _lastSettings.ShowDamageColumn),
+					CompactExpandedWidth(_lastSettings),
 					metrics.CompactCollapsedWidth,
 					_lastSettings.Scale,
 					collapsing: !_collapsed);
@@ -355,6 +367,18 @@ namespace HistoryCombatSimulation
 				_compactCollapsedLeft = left;
 			var scaledWidth = _layer.Width * _lastSettings.Scale;
 			var horizontalOffset = OverlayPositionPolicy.HorizontalOffsetFromLeft(_lastSettings.Side, canvas.ActualWidth, scaledWidth, left);
+			if(_collapsed && _lastSettings.Layout == HistoryLayout.Compact)
+			{
+				var metrics = OverlayLayoutMetrics.For(HistoryLayout.Compact);
+				horizontalOffset = OverlayPositionPolicy.CompactDragHorizontalOffset(
+					_lastSettings.Side,
+					canvas.ActualWidth,
+					CompactExpandedWidth(_lastSettings),
+					CompactExpandedExtraWidth(_lastSettings, _lastRows.Count),
+					metrics.CompactCollapsedWidth,
+					_lastSettings.Scale,
+					left);
+			}
 			_lastSettings.SetPosition(horizontalOffset, top);
 			e.Handled = true;
 		}
@@ -394,6 +418,14 @@ namespace HistoryCombatSimulation
 		{
 			var label = Text(value, fontSize, FontWeights.Bold); label.TextAlignment = TextAlignment.Center; label.VerticalAlignment = VerticalAlignment.Center; System.Windows.Controls.Grid.SetColumn(label, column); _columns.Children.Add(label);
 		}
+
+		private static double CompactExpandedWidth(PluginSettings settings)
+		{
+			var metrics = OverlayLayoutMetrics.For(HistoryLayout.Compact);
+			return metrics.CompactExpandedWidth(settings.ShowHeroColumn, settings.ShowDamageColumn);
+		}
+
+		private static double CompactExpandedExtraWidth(PluginSettings settings, int rowCount) => rowCount > settings.VisibleRows ? 10 : 0;
 
 		private static TextBlock Text(string text, double size, FontWeight weight) => new TextBlock { Text = text, Foreground = Brushes.White, FontFamily = new FontFamily("Segoe UI"), FontSize = size, FontWeight = weight };
 

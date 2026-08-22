@@ -78,7 +78,7 @@ namespace HistoryCombatSimulation
 			_trackingEnabled = _settings.Enabled;
 			_loaded = true;
 			HdtEventBridge.Attach(this);
-			InvokeUi(() => { _overlay.Attach(); _bobsBuddy.TryAttach(); });
+			InvokeUi(TryAttachUiComponents);
 		}
 
 		public void OnUnload()
@@ -112,14 +112,16 @@ namespace HistoryCombatSimulation
 				if(_attachRetry.ElapsedMilliseconds >= 2000)
 				{
 					_attachRetry.Restart();
-					InvokeUi(() =>
-					{
-						if(_overlay.Attach()) { lock(_stateSync) RefreshOverlay(); }
-						_bobsBuddy.TryAttach();
-					});
+					InvokeUi(TryAttachUiComponents);
 				}
 				if(!_trackingEnabled || _waitingForNextGameStart) { PumpOverlay(); return; }
-				PollLateSimulationRecovery();
+				var combat = _game.IsCombatPhase;
+				// A late result is bound to the completed turn only. Close that binding
+				// before polling once the next combat edge is visible. Pause during an
+				// unresolved game start so a new match can never confirm the old turn.
+				var lateSimulationAction = LateSimulationRecoveryPolicy.Decide(_lateSimulationTurn.HasValue, _gameStartGate.IsPending, _wasCombat, combat);
+				if(lateSimulationAction == LateSimulationRecoveryAction.Stop) StopLateSimulationRecovery();
+				else if(lateSimulationAction == LateSimulationRecoveryAction.Poll) PollLateSimulationRecovery();
 				var isSoloBattlegrounds = _game.IsSoloBattlegrounds;
 				if(!_soloMatchReentryGate.ShouldTrack(isSoloBattlegrounds))
 				{
@@ -129,7 +131,7 @@ namespace HistoryCombatSimulation
 				if(gameStartDecision == GameStartDecision.Wait) { PumpOverlay(); return; }
 				if(gameStartDecision == GameStartDecision.StartNewMatch || !_insideSoloMatch) StartSoloMatch();
 
-				var combat = _game.IsCombatPhase; var enteredCombat = _wasCombat == false && combat;
+				var enteredCombat = _wasCombat == false && combat;
 				if(enteredCombat) { StopLateSimulationRecovery(); _observedCombatStart = true; _skippedCombatTurn = null; }
 				if(combat && _wasCombat != true) ClearUnknownOutcomeRecovery();
 				if(_activeSnapshot != null && _combatTurnAdvanceGate.ShouldRollOver(_activeSnapshot.Turn, _game.Turn, combat, _uptime.ElapsedMilliseconds)) FinalizeInterruptedCombat();
@@ -170,7 +172,9 @@ namespace HistoryCombatSimulation
 		private void FinalizeInterruptedCombat()
 		{
 			var snapshot = _activeSnapshot; if(snapshot == null) return;
-			_bobsBuddy.EndCombat(); _tracker.FinalizeCombat(snapshot.Turn, CombatOutcome.Unknown);
+			_bobsBuddy.EndCombat();
+			var outcome = CombatOutcomeResolver.ResolveObservedDamage(_friendlyDamageAmount, _opponentDamageAmount, out var damage);
+			_tracker.FinalizeCombat(snapshot.Turn, outcome, damage);
 			ClearAwaitingDefinitiveResult(); ClearUnknownOutcomeRecovery();
 			_activeSnapshot = null; _activeSnapshotHasReliableStart = false; _observedCombatStart = false; _damageObservedBeforeSnapshot = false;
 			_friendlyDamageAmount = 0; _opponentDamageAmount = 0; _missingSimulationPoll.Reset(); _reconnectRecoveryActive = false;
@@ -242,7 +246,18 @@ namespace HistoryCombatSimulation
 			if(!_lateSimulationTurn.HasValue) return;
 			if(_lateSimulationWindow.ElapsedMilliseconds >= 30000) { StopLateSimulationRecovery(); return; }
 			if(_lateSimulationPoll.ElapsedMilliseconds < 2000) return;
-			_lateSimulationPoll.Restart(); InvokeUi(_bobsBuddy.PollLateRecovery);
+			_lateSimulationPoll.Restart(); InvokeUi(PollLateSimulationRecoveryOnUi);
+		}
+
+		private void PollLateSimulationRecoveryOnUi()
+		{
+			lock(_stateSync)
+			{
+				if(!_loaded || !_lateSimulationTurn.HasValue) return;
+				var action = LateSimulationRecoveryPolicy.Decide(true, _gameStartGate.IsPending, _wasCombat, _game.IsCombatPhase);
+				if(action == LateSimulationRecoveryAction.Stop) StopLateSimulationRecovery();
+				else if(action == LateSimulationRecoveryAction.Poll) _bobsBuddy.PollLateRecovery();
+			}
 		}
 
 		private void StopLateSimulationRecovery()
@@ -348,6 +363,19 @@ namespace HistoryCombatSimulation
 			var width = canvas.ActualWidth; var height = canvas.ActualHeight;
 			if(_lastFocusAllowsOverlay == focusAllowsOverlay && Math.Abs(_lastCanvasWidth - width) < .1 && Math.Abs(_lastCanvasHeight - height) < .1) return;
 			_lastFocusAllowsOverlay = focusAllowsOverlay; _lastCanvasWidth = width; _lastCanvasHeight = height; RefreshOverlay();
+		}
+
+		private void TryAttachUiComponents()
+		{
+			lock(_stateSync)
+			{
+				// Dispatcher work queued by OnUpdate may run after HDT unloads the
+				// plugin. Never reattach either component to a stale plugin instance.
+				if(!_loaded) return;
+				var overlayAttached = _overlay.Attach();
+				_bobsBuddy.TryAttach();
+				if(overlayAttached) RefreshOverlay();
+			}
 		}
 
 		private MenuItem BuildMenu()

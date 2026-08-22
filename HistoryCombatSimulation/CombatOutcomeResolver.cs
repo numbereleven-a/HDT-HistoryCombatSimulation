@@ -2,6 +2,23 @@ namespace HistoryCombatSimulation
 {
 	public static class CombatOutcomeResolver
 	{
+		public static CombatOutcome ResolveObservedDamage(int friendlyDamageAmount, int opponentDamageAmount, out int? combatDamage)
+		{
+			var evidence = new OutcomeEvidence(
+				null,
+				null,
+				null,
+				null,
+				friendlyDamageObserved: friendlyDamageAmount > 0,
+				opponentDamageObserved: opponentDamageAmount > 0,
+				uncertainReconnect: true,
+				friendlyDamageAmount: friendlyDamageAmount,
+				opponentDamageAmount: opponentDamageAmount);
+			var outcome = Resolve(evidence);
+			combatDamage = ResolveDamage(outcome, evidence);
+			return outcome;
+		}
+
 		public static CombatOutcome Resolve(OutcomeEvidence evidence, CombatOutcome? definitiveMatchResult = null)
 		{
 			if(definitiveMatchResult.HasValue && definitiveMatchResult.Value != CombatOutcome.Unknown)

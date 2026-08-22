@@ -23,6 +23,7 @@ internal static class Program
 		CaptureGateRejectsStalePartialAndErrorStates();
 		PostCombatRecoveryAcceptsStableCombatOrShoppingData();
 		OutcomeResolutionIsConservative();
+		InterruptedCombatKeepsObservedDamage();
 		OutcomeRecoveryRequiresStableEvidence();
 		GhostIdentityIsKeptWithoutGuessing();
 		ReconnectDuplicateIsIgnored();
@@ -31,6 +32,7 @@ internal static class Program
 		ReconnectGameStartDoesNotClearTheExistingMatch();
 		TransientTurnAdvanceDoesNotCreateAPhantomCombat();
 		StableTurnAdvanceRecoversASkippedPhaseEdge();
+		LateSimulationBindingStopsAtTheNextCombat();
 		FormattingSupportsBothLayouts();
 		LongHistoryIsRetainedForViewporting();
 		ViewportChangesKeepTheNewestRowsVisible();
@@ -124,6 +126,22 @@ internal static class Program
 		var certain = new OutcomeEvidence(40, 40, 40, 28, opponentDamageObserved: true, uncertainReconnect: false, opponentDamageAmount: 12);
 		False(gate.TryConfirm(CombatOutcome.Win, uncertain), "reconnect certainty is part of recovery evidence");
 		False(gate.TryConfirm(CombatOutcome.Win, certain), "changing reconnect certainty restarts confirmation");
+	}
+
+	private static void InterruptedCombatKeepsObservedDamage()
+	{
+		var win = CombatOutcomeResolver.ResolveObservedDamage(0, 15, out var dealtDamage);
+		Equal(CombatOutcome.Win, win, "an interrupted combat keeps a reliable observed win");
+		Equal<int?>(15, dealtDamage, "an interrupted combat keeps dealt damage");
+		var loss = CombatOutcomeResolver.ResolveObservedDamage(8, 0, out var receivedDamage);
+		Equal(CombatOutcome.Loss, loss, "an interrupted combat keeps a reliable observed loss");
+		Equal<int?>(-8, receivedDamage, "an interrupted combat keeps received damage");
+		var ambiguous = CombatOutcomeResolver.ResolveObservedDamage(8, 15, out var ambiguousDamage);
+		Equal(CombatOutcome.Unknown, ambiguous, "two observed damage sides remain ambiguous");
+		Equal<int?>(null, ambiguousDamage, "ambiguous interrupted damage remains empty");
+		var missing = CombatOutcomeResolver.ResolveObservedDamage(0, 0, out var missingDamage);
+		Equal(CombatOutcome.Unknown, missing, "missing interrupted evidence does not fabricate a tie");
+		Equal<int?>(null, missingDamage, "missing interrupted damage remains empty");
 	}
 
 	private static void CaptureGateRejectsStalePartialAndErrorStates()
@@ -234,6 +252,15 @@ internal static class Program
 		False(gate.ShouldRollOver(7, 0, true, 5000), "temporarily missing turn metadata does not discard the active combat");
 	}
 
+	private static void LateSimulationBindingStopsAtTheNextCombat()
+	{
+		Equal(LateSimulationRecoveryAction.Poll, LateSimulationRecoveryPolicy.Decide(true, false, false, false), "shopping continues late simulation recovery");
+		Equal(LateSimulationRecoveryAction.Stop, LateSimulationRecoveryPolicy.Decide(true, false, false, true), "the next observed combat edge closes the prior turn binding");
+		Equal(LateSimulationRecoveryAction.None, LateSimulationRecoveryPolicy.Decide(true, true, false, true), "an unresolved game start cannot poll the prior turn binding");
+		Equal(LateSimulationRecoveryAction.Poll, LateSimulationRecoveryPolicy.Decide(true, false, null, true), "a stale post-match combat flag does not discard GameOver recovery");
+		Equal(LateSimulationRecoveryAction.None, LateSimulationRecoveryPolicy.Decide(false, false, false, false), "a closed binding performs no recovery work");
+	}
+
 	private static void FormattingSupportsBothLayouts()
 	{
 		var p = new SimulationProbabilities(.642, .031, .327);
@@ -303,6 +330,17 @@ internal static class Program
 		Near(256, OverlayPositionPolicy.CompactLeftAfterToggle(100, 176, 20, 1, collapsing: true), "compact collapse keeps the button at its expanded right edge");
 		Near(100, OverlayPositionPolicy.CompactLeftAfterToggle(256, 176, 20, 1, collapsing: false), "compact expansion restores the original table position");
 		Near(412, OverlayPositionPolicy.CompactLeftAfterToggle(100, 176, 20, 2, collapsing: true), "compact collapse movement accounts for overlay scale");
+		Near(344, OverlayPositionPolicy.CompactDragHorizontalOffset(OverlaySide.Left, 1920, 176, 0, 20, 1, 500), "dragging a left-placed collapsed compact overlay stores the expanded table coordinate");
+		Near(500, OverlayPositionPolicy.CompactCollapsedLeftFromHorizontalOffset(OverlaySide.Left, 1920, 176, 0, 20, 1, 344), "the saved left offset keeps the collapsed button at its dragged coordinate");
+		Near(412, OverlayPositionPolicy.CompactCollapsedLeftFromHorizontalOffset(OverlaySide.Left, 1920, 176, 0, 20, 2, 100), "a scale change recalculates the collapsed button from the expanded anchor");
+		var compactRightOffset = OverlayPositionPolicy.CompactDragHorizontalOffset(OverlaySide.Right, 1920, 176, 0, 20, 1, 500);
+		Near(1400, compactRightOffset, "dragging a right-placed collapsed compact overlay stores its right offset");
+		Near(500, OverlayPositionPolicy.CompactCollapsedLeftFromHorizontalOffset(OverlaySide.Right, 1920, 176, 0, 20, 1, compactRightOffset), "the saved right offset keeps the collapsed button at its dragged coordinate");
+		Near(344, 1920 - 176 - compactRightOffset, "the saved right offset restores the expanded compact table coordinate");
+		var compactRightOffsetWithScrollbar = OverlayPositionPolicy.CompactDragHorizontalOffset(OverlaySide.Right, 1920, 176, 10, 20, 1, 500);
+		Near(1390, compactRightOffsetWithScrollbar, "the saved right offset accounts for an expanded scrollbar without moving the collapse button");
+		Near(500, OverlayPositionPolicy.CompactCollapsedLeftFromHorizontalOffset(OverlaySide.Right, 1920, 176, 10, 20, 1, compactRightOffsetWithScrollbar), "the scrollbar-aware right offset keeps the collapsed button at its dragged coordinate");
+		Near(344, 1920 - 186 - compactRightOffsetWithScrollbar, "the scrollbar-aware right offset restores the expanded compact table coordinate");
 		True(compact.TurnWidth + compact.HeroWidth + compact.ProbabilityWidth + compact.DamageWidth + compact.ResultWidth < normal.TurnWidth + normal.HeroWidth + normal.ProbabilityWidth * 3 + normal.DamageWidth + normal.ResultWidth, "compact table is narrower");
 	}
 
@@ -348,7 +386,7 @@ internal static class Program
 
 	private static void VersionAndMovementDefaultsAreStable()
 	{
-		Equal("1.4", PluginVersion.Display, "short displayed version"); Equal("1.4", PluginVersion.LocalRelease, "stable release label"); Equal("1.4", PluginVersion.Hdt.ToString(), "HDT version has no trailing zeroes");
+		Equal("1.4.1", PluginVersion.Display, "short displayed version"); Equal("1.4.1", PluginVersion.LocalRelease, "stable release label"); Equal("1.4.1", PluginVersion.Hdt.ToString(), "HDT version has no trailing zeroes");
 		Equal(PluginVersion.LocalRelease, typeof(PluginVersion).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion, "assembly informational version matches local release label");
 		var settings = new PluginSettings(); True(settings.LockOverlayPosition, "overlay movement is locked by default"); True(settings.ShowAnomalyStatus, "anomaly status is shown by default");
 		False(settings.ShowDamageColumn, "combat damage column is hidden by default"); True(settings.ShowHeroColumn, "hero column is shown by default");

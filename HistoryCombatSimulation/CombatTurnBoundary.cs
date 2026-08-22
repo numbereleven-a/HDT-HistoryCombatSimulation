@@ -5,6 +5,20 @@ namespace HistoryCombatSimulation
 		public static bool HasAdvanced(int activeTurn, int currentTurn) => activeTurn > 0 && currentTurn > activeTurn;
 	}
 
+	public enum LateSimulationRecoveryAction { None, Poll, Stop }
+
+	public static class LateSimulationRecoveryPolicy
+	{
+		public static LateSimulationRecoveryAction Decide(bool hasBinding, bool gameStartPending, bool? wasCombat, bool isCombatPhase)
+		{
+			if(!hasBinding || gameStartPending)
+				return LateSimulationRecoveryAction.None;
+			return wasCombat == false && isCombatPhase
+				? LateSimulationRecoveryAction.Stop
+				: LateSimulationRecoveryAction.Poll;
+		}
+	}
+
 	public sealed class CombatTurnAdvanceGate
 	{
 		public const long ConfirmationMilliseconds = 2000;
