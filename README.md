@@ -47,6 +47,8 @@ HistoryCombatSimulation only accepts complete win, tie, and loss percentages fro
 
 Empty, incomplete, malformed, and inequality-based results are left blank instead of being displayed as zeroes.
 
+Recovery also requires an observed Bob's Buddy reset for the bound combat. Repeated identical percentages alone do not confirm that they belong to that combat. If the reset was missed during a reconnect or late attachment, probabilities and anomaly markers remain empty until a new reset and complete result are observed for that combat.
+
 The plugin supports Solo Battlegrounds. Partial Duo simulations are ignored.
 
 ## Configuration
