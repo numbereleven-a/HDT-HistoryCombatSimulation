@@ -13,8 +13,28 @@ using HistoryCombatSimulation;
 
 internal static class Program
 {
-	private static int Main()
+	[STAThread]
+	private static int Main(string[] args)
 	{
+		var runtime = Environment.GetEnvironmentVariable("HDT_TEST_RUNTIME");
+		if(!string.IsNullOrEmpty(runtime)) AppDomain.CurrentDomain.AssemblyResolve += (_, e) =>
+		{
+			var name = new AssemblyName(e.Name).Name;
+			foreach(var extension in new[] { ".dll", ".exe" })
+			{
+				var path = Path.Combine(runtime, name + extension);
+				if(File.Exists(path)) return Assembly.LoadFrom(path);
+			}
+			return null;
+		};
+		if(args.Contains("--lifecycle"))
+		{
+			var failures = 0;
+			foreach(var test in new Action[] { CombatLifecycleTests.StableOldPercentagesRemainUnknown, CombatLifecycleTests.RecoveryRequiresResetAndContinuousCompleteValues, CombatLifecycleTests.UnloadClearsCombatState, CombatLifecycleTests.SimulationEventsCannotCrossBindings, CombatLifecycleTests.QueuedUiWorkCannotCrossReload })
+				try { test(); Console.WriteLine("PASS " + test.Method.Name); }
+				catch(Exception ex) { failures++; Console.WriteLine("FAIL " + test.Method.Name + ": " + ex); }
+			return failures == 0 ? 0 : 1;
+		}
 		OneRowPerCombatAndDuplicateNotifications();
 		TrackerAndSettingsSnapshotsAreThreadSafe();
 		RerunUpdatesTheSameRow();
@@ -157,16 +177,22 @@ internal static class Program
 
 		var reconnect = new BobsBuddyCaptureGate(); reconnect.BeginCombat(true);
 		False(reconnect.TryCapture(BobsBuddyCaptureState.Combat, true, true, "55%", "10%", "35%", CultureInfo.InvariantCulture, out _, guardedCheck: false), "a complete notification without the reset is remembered but not accepted");
-		True(reconnect.TryCapture(BobsBuddyCaptureState.Combat, true, true, "55%", "10%", "35%", CultureInfo.InvariantCulture, out var recovered, guardedCheck: true), "a later guarded check confirms the remembered result"); Near(.55, recovered!.Win, "recovered result after a missed reset notification");
+		False(reconnect.TryCapture(BobsBuddyCaptureState.Combat, true, true, "55%", "10%", "35%", CultureInfo.InvariantCulture, out _, guardedCheck: true), "a later guarded check cannot prove ownership without a reset");
+		reconnect.TryCapture(BobsBuddyCaptureState.Combat, true, true, "-", "-", "-", CultureInfo.InvariantCulture, out _);
+		False(reconnect.TryCapture(BobsBuddyCaptureState.Combat, true, true, "55%", "10%", "35%", CultureInfo.InvariantCulture, out _, guardedCheck: true), "recovery after reset seeds confirmation");
+		True(reconnect.TryCapture(BobsBuddyCaptureState.Combat, true, true, "55%", "10%", "35%", CultureInfo.InvariantCulture, out var recovered, guardedCheck: true), "guarded recovery confirms a result after the current reset"); Near(.55, recovered!.Win, "confirmed recovered result");
 		var changed = new BobsBuddyCaptureGate(); changed.BeginCombat(true);
+		changed.TryCapture(BobsBuddyCaptureState.Combat, true, true, "-", "-", "-", CultureInfo.InvariantCulture, out _);
 		False(changed.TryCapture(BobsBuddyCaptureState.Combat, true, true, "60%", "10%", "30%", CultureInfo.InvariantCulture, out _, guardedCheck: true), "first guarded value can be stale");
 		False(changed.TryCapture(BobsBuddyCaptureState.Combat, true, true, "70%", "10%", "20%", CultureInfo.InvariantCulture, out _, guardedCheck: true), "a changed guarded value becomes a new candidate instead of being published");
 		True(changed.TryCapture(BobsBuddyCaptureState.Combat, true, true, "70%", "10%", "20%", CultureInfo.InvariantCulture, out var refreshed, guardedCheck: true), "the changed candidate requires a second identical guarded check"); Near(.70, refreshed!.Win, "stable refreshed recovery result");
 		var midCombatReconnect = new BobsBuddyCaptureGate(); midCombatReconnect.BeginCombat(); midCombatReconnect.EnableGuardedRecovery();
+		midCombatReconnect.TryCapture(BobsBuddyCaptureState.Combat, true, true, "-", "-", "-", CultureInfo.InvariantCulture, out _);
 		False(midCombatReconnect.TryCapture(BobsBuddyCaptureState.Combat, true, true, "65%", "5%", "30%", CultureInfo.InvariantCulture, out _, guardedCheck: true), "mid-combat recovery starts with a guarded candidate");
 		True(midCombatReconnect.TryCapture(BobsBuddyCaptureState.Combat, true, true, "65%", "5%", "30%", CultureInfo.InvariantCulture, out _, guardedCheck: true), "mid-combat recovery also succeeds after a stable second check");
 		midCombatReconnect.EndCombat(); False(midCombatReconnect.TryCapture(BobsBuddyCaptureState.Combat, true, true, "75%", "5%", "20%", CultureInfo.InvariantCulture, out _, guardedCheck: true), "values from a later combat cannot pass through a closed prior-turn gate");
 		var late = new BobsBuddyCaptureGate(); late.BeginCombat(true);
+		late.TryCapture(BobsBuddyCaptureState.Combat, true, true, "-", "-", "-", CultureInfo.InvariantCulture, out _);
 		False(late.TryCapture(BobsBuddyCaptureState.Shopping, true, true, "100%", "0%", "0%", CultureInfo.InvariantCulture, out _, guardedCheck: true), "shopping results are rejected outside explicit post-combat recovery");
 		False(late.TryCapture(BobsBuddyCaptureState.Shopping, true, true, "100%", "0%", "0%", CultureInfo.InvariantCulture, out _, guardedCheck: true, allowPostCombatState: true), "first late shopping value only seeds guarded confirmation");
 		True(late.TryCapture(BobsBuddyCaptureState.Shopping, true, true, "100%", "0%", "0%", CultureInfo.InvariantCulture, out var lateResult, guardedCheck: true, allowPostCombatState: true), "stable late shopping result is accepted for the bound turn"); Near(1, lateResult!.Win, "late 100-percent win");
@@ -386,7 +412,7 @@ internal static class Program
 
 	private static void VersionAndMovementDefaultsAreStable()
 	{
-		Equal("1.4.1", PluginVersion.Display, "short displayed version"); Equal("1.4.1", PluginVersion.LocalRelease, "stable release label"); Equal("1.4.1", PluginVersion.Hdt.ToString(), "HDT version has no trailing zeroes");
+		Equal("1.4.2", PluginVersion.Display, "short displayed version"); Equal("1.4.2", PluginVersion.LocalRelease, "stable release label"); Equal("1.4.2", PluginVersion.Hdt.ToString(), "HDT version has no trailing zeroes");
 		Equal(PluginVersion.LocalRelease, typeof(PluginVersion).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion, "assembly informational version matches local release label");
 		var settings = new PluginSettings(); True(settings.LockOverlayPosition, "overlay movement is locked by default"); True(settings.ShowAnomalyStatus, "anomaly status is shown by default");
 		False(settings.ShowDamageColumn, "combat damage column is hidden by default"); True(settings.ShowHeroColumn, "hero column is shown by default");

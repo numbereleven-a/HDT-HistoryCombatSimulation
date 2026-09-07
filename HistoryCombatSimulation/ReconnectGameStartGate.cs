@@ -10,6 +10,7 @@ namespace HistoryCombatSimulation
 
 		public ReconnectGameStartGate(long decisionDelayMilliseconds = 10000) => _decisionDelayMilliseconds = decisionDelayMilliseconds;
 		public bool IsPending => _pending;
+		public void Reset() { _pending = false; _soloReadySince = null; }
 		public void Notify() { _pending = true; _soloReadySince = null; }
 
 		public GameStartDecision Resolve(bool isSoloBattlegrounds, bool isReconnect, long nowMilliseconds)
