@@ -120,7 +120,7 @@ namespace HistoryCombatSimulation
 				|| Math.Abs(_appliedVerticalOffset - settings.VerticalOffset) >= .01;
 			var canvasWidth = _canvas?.ActualWidth ?? double.NaN;
 			var canvasWidthUnchanged = IsFinite(canvasWidth) && Math.Abs(_appliedCanvasWidth - canvasWidth) < .1;
-			var preview = rows.Count == 0 && (settings.ShowOverlayPreview || !settings.LockOverlayPosition);
+			var preview = rows.Count == 0 && settings.ShowOverlayPreview;
 			if(rows.Count == 0 && !preview)
 			{
 				_lastRowCount = 0;

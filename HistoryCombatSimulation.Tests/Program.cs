@@ -60,6 +60,7 @@ internal static class Program
 		AnomaliesAndSummaryAreSymmetric();
 		VersionParsingAndManualUpdateCheck();
 		VersionAndMovementDefaultsAreStable();
+		UnlockingTheOverlayDoesNotEnablePreview();
 		SettingsOpenWithoutInitializedOwnerHandle();
 		Console.WriteLine("All HistoryCombatSimulation tests passed.");
 		return 0;
@@ -432,6 +433,19 @@ internal static class Program
 		var invalid = new PluginSettings { Scale = double.NaN, BackgroundOpacity = double.PositiveInfinity }; invalid.Normalize(); Near(1, invalid.Scale, "non-finite settings use a safe fallback"); Near(1, invalid.BackgroundOpacity, "non-finite background opacity uses a safe fallback");
 		Throws<ArgumentOutOfRangeException>(() => new SimulationProbabilities(double.NaN, 0, 1), "probability model rejects NaN");
 		Throws<ArgumentOutOfRangeException>(() => new SimulationProbabilities(.8, .8, 0), "probability model rejects an invalid total");
+	}
+
+	private static void UnlockingTheOverlayDoesNotEnablePreview()
+	{
+		var overlay = new HistoryOverlay();
+		var attached = typeof(HistoryOverlay).GetField("_attached", BindingFlags.Instance | BindingFlags.NonPublic) ?? throw new MissingFieldException("HistoryOverlay", "_attached");
+		var layerField = typeof(HistoryOverlay).GetField("_layer", BindingFlags.Instance | BindingFlags.NonPublic) ?? throw new MissingFieldException("HistoryOverlay", "_layer");
+		attached.SetValue(overlay, true);
+		var layer = (FrameworkElement)(layerField.GetValue(overlay) ?? throw new InvalidOperationException("overlay layer is unavailable"));
+
+		overlay.Update(Array.Empty<CombatRow>(), new PluginSettings { LockOverlayPosition = false, ShowOverlayPreview = false }, true);
+
+		Equal(Visibility.Collapsed, layer.Visibility, "unlocking the overlay does not enable example rows when preview is disabled");
 	}
 
 	private static void SettingsOpenWithoutInitializedOwnerHandle()

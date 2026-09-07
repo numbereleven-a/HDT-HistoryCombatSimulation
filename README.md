@@ -80,7 +80,7 @@ Available settings include:
 
 You can move the overlay by dragging it while its position is unlocked.
 
-When there is no combat history, unlocking the overlay shows a preview so you can configure its position before starting a match.
+When there is no combat history, enable **Overlay preview** to show example rows while configuring the overlay before starting a match. Unlocking the overlay only enables dragging and does not turn the preview on.
 
 ## Installation
 

@@ -375,7 +375,7 @@ namespace HistoryCombatSimulation
 		private void RefreshOverlay()
 		{
 			var settings = _settings.Snapshot();
-			var rows = _tracker.SnapshotRows(); var hasContentOrPreview = _insideSoloMatch || _tracker.RetainingCompletedMatch || settings.ShowOverlayPreview || !settings.LockOverlayPosition;
+			var rows = _tracker.SnapshotRows(); var hasContentOrPreview = _insideSoloMatch || _tracker.RetainingCompletedMatch || settings.ShowOverlayPreview;
 			var focusAllowsOverlay = !settings.HideWhenHearthstoneNotForeground || User32.IsHearthstoneInForeground();
 			_lastFocusAllowsOverlay = focusAllowsOverlay; InvokeUi(() => _overlay.Update(rows, settings, hasContentOrPreview && focusAllowsOverlay));
 		}
