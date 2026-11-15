@@ -329,13 +329,28 @@ namespace HistoryCombatSimulation
 			if(!_loaded) return;
 			if(!_trackingEnabled || _waitingForNextGameStart || !_insideSoloMatch || _gameStartGate.IsPending) return;
 			if(_activeSnapshot != null) FinalizeActiveCombat(outcome);
-			else if(_awaitingDefinitiveResultTurn.HasValue && _awaitingDefinitiveResultEpoch == _matchEpoch && _awaitingDefinitiveEvidence != null)
+			else if(_awaitingDefinitiveResultTurn.HasValue && _awaitingDefinitiveResultEpoch == _matchEpoch)
 			{
-				if(CombatOutcomeResolver.SupportsDefinitiveMatchResult(outcome, _awaitingDefinitiveEvidence))
-					_tracker.ApplyDefinitiveResult(_awaitingDefinitiveResultTurn.Value, outcome, CombatOutcomeResolver.ResolveDamage(outcome, _awaitingDefinitiveEvidence));
+				var evidence = ResolveDefinitiveMatchEvidence(outcome);
+				if(evidence != null)
+					_tracker.ApplyDefinitiveResult(_awaitingDefinitiveResultTurn.Value, outcome, CombatOutcomeResolver.ResolveDamage(outcome, evidence));
 			}
-			ClearAwaitingDefinitiveResult(); ClearUnknownOutcomeRecovery(); _tracker.EndMatch();
+			ClearAwaitingDefinitiveResult(); ClearUnknownOutcomeRecovery();
+			ExitSoloMatch();
 			_soloMatchReentryGate.MatchEnded();
+		}
+
+		private OutcomeEvidence? ResolveDefinitiveMatchEvidence(CombatOutcome outcome)
+		{
+			if(_pendingUnknownSnapshot != null)
+			{
+				var currentEvidence = _game.GetOutcomeEvidence(_pendingUnknownSnapshot, _pendingFriendlyDamageAmount, _pendingOpponentDamageAmount, _pendingSnapshotStartedMidCombat, allowReconnectRecovery: true);
+				if(CombatOutcomeResolver.SupportsDefinitiveMatchResult(outcome, currentEvidence))
+					return currentEvidence;
+			}
+			return _awaitingDefinitiveEvidence != null && CombatOutcomeResolver.SupportsDefinitiveMatchResult(outcome, _awaitingDefinitiveEvidence)
+				? _awaitingDefinitiveEvidence
+				: null;
 		}
 
 		internal void HandleDamage(PredamageInfo info)
@@ -407,9 +422,9 @@ namespace HistoryCombatSimulation
 		private MenuItem BuildMenu()
 		{
 			var root = new MenuItem { Header = "History Combat Simulation" };
-			_enabledMenuItem = new MenuItem { Header = "Enabled", IsCheckable = true, IsChecked = _settings.Enabled }; _enabledMenuItem.Click += (_, __) => { lock(_stateSync) { _settings.Enabled = _enabledMenuItem.IsChecked; ApplyEnabledState(); _settings.Save(); RefreshOverlay(); } };
+			_enabledMenuItem = new MenuItem { Header = "Enabled", IsCheckable = true, IsChecked = _settings.Enabled }; _enabledMenuItem.Click += (_, __) => { lock(_stateSync) { _settings.Enabled = _enabledMenuItem.IsChecked; ApplyEnabledState(); _settingsWindow?.SyncMenuOptions(); _settings.Save(); RefreshOverlay(); } };
 			var settings = new MenuItem { Header = "Settings" }; settings.Click += (_, __) => ShowSettings();
-			_lockMenuItem = new MenuItem { Header = "Lock overlay position", IsCheckable = true, IsChecked = _settings.LockOverlayPosition }; _lockMenuItem.Click += (_, __) => { lock(_stateSync) { _settings.LockOverlayPosition = _lockMenuItem.IsChecked; _settings.Save(); RefreshOverlay(); } };
+			_lockMenuItem = new MenuItem { Header = "Lock overlay position", IsCheckable = true, IsChecked = _settings.LockOverlayPosition }; _lockMenuItem.Click += (_, __) => { lock(_stateSync) { _settings.LockOverlayPosition = _lockMenuItem.IsChecked; _settingsWindow?.SyncMenuOptions(); _settings.Save(); RefreshOverlay(); } };
 			root.Items.Add(_enabledMenuItem); root.Items.Add(_lockMenuItem); root.Items.Add(settings); return root;
 		}
 

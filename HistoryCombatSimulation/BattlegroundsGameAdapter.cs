@@ -56,7 +56,7 @@ namespace HistoryCombatSimulation
 			var tagged = game.PlayerEntity?.GetTag(GameTag.PLAYER_ID) ?? 0; return tagged > 0 ? tagged : game.Player.Id;
 		}
 
-		private static int? Durability(Entity? hero) => hero == null ? (int?)null : hero.Health + hero.GetTag(GameTag.ARMOR);
+		private static int? Durability(Entity? hero) => hero == null || hero.GetTag(GameTag.HEALTH) <= 0 ? (int?)null : hero.Health + hero.GetTag(GameTag.ARMOR);
 		private static bool IsKnownDefeatedHero(Entity hero) => hero.GetTag(GameTag.HEALTH) > 0 && hero.Health <= 0;
 		private static bool TryScanHeroes(IEnumerable<Entity>? entities, out Entity[] heroes)
 		{

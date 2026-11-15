@@ -413,7 +413,7 @@ internal static class Program
 
 	private static void VersionAndMovementDefaultsAreStable()
 	{
-		Equal("1.4.2", PluginVersion.Display, "short displayed version"); Equal("1.4.2", PluginVersion.LocalRelease, "stable release label"); Equal("1.4.2", PluginVersion.Hdt.ToString(), "HDT version has no trailing zeroes");
+		Equal("1.4.3", PluginVersion.Display, "short displayed version"); Equal("1.4.3", PluginVersion.LocalRelease, "stable release label"); Equal("1.4.3", PluginVersion.Hdt.ToString(), "HDT version has no trailing zeroes");
 		Equal(PluginVersion.LocalRelease, typeof(PluginVersion).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion, "assembly informational version matches local release label");
 		var settings = new PluginSettings(); True(settings.LockOverlayPosition, "overlay movement is locked by default"); True(settings.ShowAnomalyStatus, "anomaly status is shown by default");
 		False(settings.ShowDamageColumn, "combat damage column is hidden by default"); True(settings.ShowHeroColumn, "hero column is shown by default");
@@ -459,8 +459,18 @@ internal static class Program
 				var owner = new Window();
 				application.MainWindow = owner;
 
-				var settingsWindow = new SettingsWindow(new PluginSettings(), _ => { }, PluginVersion.Hdt);
+				var initialSettings = new PluginSettings { BackgroundMode = OverlayBackgroundMode.Transparent, BackgroundOpacity = .35, Enabled = false, LockOverlayPosition = false };
+				PluginSettings? applied = null;
+				var settingsWindow = new SettingsWindow(initialSettings, s => applied = s.Snapshot(), PluginVersion.Hdt);
 				Equal(WindowStartupLocation.CenterScreen, settingsWindow.WindowStartupLocation, "settings use the screen when the owner handle is unavailable");
+				initialSettings.Enabled = true; initialSettings.LockOverlayPosition = true;
+				settingsWindow.SyncMenuOptions();
+				FindButton(settingsWindow, "Reset visual settings")!.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+				FindButton(settingsWindow, "Apply")!.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+				True(applied != null, "applying after visual reset produces settings");
+				Equal(OverlayBackgroundMode.Full, applied!.BackgroundMode, "visual reset restores default background mode");
+				Near(1, applied.BackgroundOpacity, "visual reset restores default background opacity");
+				True(applied.Enabled && applied.LockOverlayPosition, "synced menu options are preserved on apply");
 				settingsWindow.Close(); owner.Close(); application.Shutdown();
 			}
 			catch(Exception ex) { failure = ex; }
@@ -503,6 +513,29 @@ internal static class Program
 			Environment.SetEnvironmentVariable("HDT_HISTORYCOMBATSIMULATION_UPDATE_REPOSITORY", oldRepository);
 			Environment.SetEnvironmentVariable("HDT_HISTORYCOMBATSIMULATION_UPDATE_TOKEN", oldToken);
 		}
+	}
+
+	private static System.Windows.Controls.Button? FindButton(object? node, string caption)
+	{
+		if(node is System.Windows.Controls.Button button && Equals(button.Content, caption)) return button;
+		if(node is System.Windows.Controls.ContentControl contentControl) return FindButton(contentControl.Content, caption);
+		if(node is System.Windows.Controls.Panel panel)
+		{
+			foreach(var child in panel.Children)
+			{
+				var found = FindButton(child, caption);
+				if(found != null) return found;
+			}
+		}
+		if(node is System.Windows.Controls.ItemsControl itemsControl)
+		{
+			foreach(var item in itemsControl.Items)
+			{
+				var found = FindButton(item, caption);
+				if(found != null) return found;
+			}
+		}
+		return null;
 	}
 
 	private static CombatSnapshot Snapshot(int turn, int opponent, bool ghost = false) => new CombatSnapshot(turn, opponent, opponent + 100, "TB_BaconShop_HERO_PH", ghost, 40, 40);

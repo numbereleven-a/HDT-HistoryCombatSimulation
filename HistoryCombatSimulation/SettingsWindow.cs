@@ -48,7 +48,7 @@ namespace HistoryCombatSimulation
 			generalPanel.Children.Add(_strictAnomalies);
 			AddSlider(generalPanel, "! expected result, %", "unusual", 51, 99, 1, "0");
 			AddSlider(generalPanel, "!! expected result, %", "very", 51, 99, 1, "0");
-			AddSlider(generalPanel, "!!! expected result, %", "extreme", 50, 100, 1, "0");
+			AddSlider(generalPanel, "!!! expected result, %", "extreme", 51, 100, 1, "0");
 			generalPanel.Children.Add(_showAnomalies);
 			generalPanel.Children.Add(new TextBlock { Text = "Table columns", Margin = new Thickness(4, 18, 4, 4), FontWeight = FontWeights.SemiBold });
 			generalPanel.Children.Add(new TextBlock { Text = "Compact order: Win / Tie / Loss", Margin = new Thickness(4, 2, 4, 4), Foreground = Brushes.DimGray });
@@ -164,7 +164,7 @@ namespace HistoryCombatSimulation
 
 		private void LoadVisualValues(PluginSettings source)
 		{
-			_layout.SelectedItem = source.Layout; _side.SelectedItem = source.Side;
+			_layout.SelectedItem = source.Layout; _side.SelectedItem = source.Side; _backgroundMode.SelectedItem = source.BackgroundMode;
 			Set("x", source.HorizontalOffset); Set("y", source.VerticalOffset); Set("scale", source.Scale); Set("opacity", source.Opacity); Set("backgroundOpacity", source.BackgroundOpacity); Set("rows", source.VisibleRows);
 		}
 
@@ -180,6 +180,11 @@ namespace HistoryCombatSimulation
 		public void SyncPosition()
 		{
 			var snapshot = _settings.Snapshot(); Set("x", snapshot.HorizontalOffset); Set("y", snapshot.VerticalOffset);
+		}
+
+		public void SyncMenuOptions()
+		{
+			var snapshot = _settings.Snapshot(); _enabled.IsChecked = snapshot.Enabled; _lockPosition.IsChecked = snapshot.LockOverlayPosition;
 		}
 
 		private void AddSlider(Panel panel, string label, string key, double minimum, double maximum, double tick, string format)

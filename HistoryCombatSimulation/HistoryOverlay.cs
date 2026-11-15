@@ -51,6 +51,11 @@ namespace HistoryCombatSimulation
 		private double _compactCollapsedLeft = double.NaN;
 		private bool _hasAppliedPosition;
 		private OverlaySide _appliedSide;
+		private HistoryLayout _appliedLayout;
+		private double _appliedScale;
+		private bool _appliedShowDamageColumn;
+		private bool _appliedShowHeroColumn;
+		private bool _appliedShowMatchSummary;
 		private double _appliedHorizontalOffset;
 		private double _appliedVerticalOffset;
 		private double _appliedCanvasWidth = double.NaN;
@@ -63,7 +68,7 @@ namespace HistoryCombatSimulation
 			var headerContent = new DockPanel(); DockPanel.SetDock(_collapse, Dock.Right); headerContent.Children.Add(_collapse); headerContent.Children.Add(_title); _header.Background = _headerBackground; _header.Child = headerContent; _content.Children.Add(_header); _content.Children.Add(_summary); _content.Children.Add(_columns); _content.Children.Add(_older); _content.Children.Add(_rows);
 			_visual.Child = _content; _layer.Children.Add(_visual); _layer.Children.Add(_scroll);
 			_scroll.ValueChanged += (_, __) => { if(!_changingScroll && _lastSettings != null) RenderViewport(_lastRows, _lastSettings); };
-			_visual.MouseLeftButtonDown += BeginDrag; _visual.MouseMove += Drag; _visual.MouseLeftButtonUp += EndDrag;
+			_visual.MouseLeftButtonDown += BeginDrag; _visual.MouseMove += Drag; _visual.MouseLeftButtonUp += EndDrag; _visual.LostMouseCapture += (_, __) => _dragging = false;
 			_collapse.Click += (_, __) => ToggleCollapsed();
 		}
 
@@ -89,6 +94,8 @@ namespace HistoryCombatSimulation
 		{
 			if(!_attached)
 				return;
+			_dragging = false;
+			if(_visual.IsMouseCaptured) _visual.ReleaseMouseCapture();
 			OverlayExtensions.SetIsOverlayHitTestVisible(_scroll, false);
 			OverlayExtensions.SetIsOverlayHitTestVisible(_collapse, false);
 			OverlayExtensions.SetIsOverlayHitTestVisible(_visual, false);
@@ -116,6 +123,11 @@ namespace HistoryCombatSimulation
 			var previousTop = Canvas.GetTop(_layer);
 			var positionInputChanged = !_hasAppliedPosition
 				|| _appliedSide != settings.Side
+				|| _appliedLayout != settings.Layout
+				|| Math.Abs(_appliedScale - settings.Scale) >= .001
+				|| _appliedShowDamageColumn != settings.ShowDamageColumn
+				|| _appliedShowHeroColumn != settings.ShowHeroColumn
+				|| _appliedShowMatchSummary != settings.ShowMatchSummary
 				|| Math.Abs(_appliedHorizontalOffset - settings.HorizontalOffset) >= .01
 				|| Math.Abs(_appliedVerticalOffset - settings.VerticalOffset) >= .01;
 			var canvasWidth = _canvas?.ActualWidth ?? double.NaN;
@@ -145,6 +157,8 @@ namespace HistoryCombatSimulation
 			var containsStaleRows = _rowVisuals.Keys.Any(existing => !currentRowIdentities.Contains(existing));
 			if(_layout != settings.Layout || _showDamageColumn != settings.ShowDamageColumn || _showHeroColumn != settings.ShowHeroColumn || containsStaleRows)
 			{
+				if(_layout != settings.Layout || _showDamageColumn != settings.ShowDamageColumn || _showHeroColumn != settings.ShowHeroColumn)
+					_normalExpandedWidth = double.NaN;
 				_layout = settings.Layout; _showDamageColumn = settings.ShowDamageColumn; _showHeroColumn = settings.ShowHeroColumn; _rows.Children.Clear(); _rowVisuals.Clear(); ConfigureColumnHeader(settings.Layout, settings.ShowHeroColumn, settings.ShowDamageColumn);
 			}
 			foreach(var row in displayRows)
@@ -225,6 +239,11 @@ namespace HistoryCombatSimulation
 		{
 			_hasAppliedPosition = true;
 			_appliedSide = settings.Side;
+			_appliedLayout = settings.Layout;
+			_appliedScale = settings.Scale;
+			_appliedShowDamageColumn = settings.ShowDamageColumn;
+			_appliedShowHeroColumn = settings.ShowHeroColumn;
+			_appliedShowMatchSummary = settings.ShowMatchSummary;
 			_appliedHorizontalOffset = settings.HorizontalOffset;
 			_appliedVerticalOffset = settings.VerticalOffset;
 			_appliedCanvasWidth = _canvas?.ActualWidth ?? double.NaN;
@@ -490,6 +509,7 @@ namespace HistoryCombatSimulation
 			private Card? _loadedHeroCard;
 			private bool _usingPreferredPortrait;
 			private bool _portraitDownloadInFlight;
+			private bool _portraitDownloadAttempted;
 			private int _portraitRequestId;
 
 			public void Update(CombatRow row, PluginSettings settings)
@@ -510,7 +530,7 @@ namespace HistoryCombatSimulation
 				{
 					if(!string.Equals(_loadedHeroCardId, row.Snapshot.HeroCardId, StringComparison.Ordinal))
 					{
-						_loadedHeroCardId = row.Snapshot.HeroCardId; _loadedHeroCard = Database.GetCardFromId(_loadedHeroCardId); _portraitRequestId++; _portraitDownloadInFlight = false; SetBestCachedPortrait(_loadedHeroCard);
+						_loadedHeroCardId = row.Snapshot.HeroCardId; _loadedHeroCard = Database.GetCardFromId(_loadedHeroCardId); _portraitRequestId++; _portraitDownloadInFlight = false; _portraitDownloadAttempted = false; SetBestCachedPortrait(_loadedHeroCard);
 					}
 					else if(!_usingPreferredPortrait && _loadedHeroCard != null)
 					{
@@ -541,8 +561,8 @@ namespace HistoryCombatSimulation
 
 			private async void RequestMissingPortrait(Card card)
 			{
-				var downloader = AssetDownloaders.cardPortraitDownloader; if(downloader == null || _portraitDownloadInFlight) return;
-				var requestId = _portraitRequestId; _portraitDownloadInFlight = true;
+				var downloader = AssetDownloaders.cardPortraitDownloader; if(downloader == null || _portraitDownloadInFlight || _portraitDownloadAttempted) return;
+				var requestId = _portraitRequestId; _portraitDownloadInFlight = true; _portraitDownloadAttempted = true;
 				try
 				{
 					var portrait = await downloader.GetAssetData(card);
